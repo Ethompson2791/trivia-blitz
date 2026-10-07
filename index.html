@@ -328,6 +328,27 @@ textarea.inp{resize:vertical;line-height:1.35}
 .locked-row{display:flex;flex-wrap:wrap;gap:10px;justify-content:center;max-width:360px}
 .locked-shape.mini{width:68px;height:68px;border-radius:18px;font-size:34px;box-shadow:0 5px 0 var(--cd)}
 
+/* ---------- slider 1-10 questions ---------- */
+.scale-pick{display:grid;grid-template-columns:repeat(10,1fr);gap:6px}
+.scale-pick button{aspect-ratio:1;border-radius:10px;border:2px solid var(--line);background:rgba(255,255,255,.05);font-weight:900;font-size:16px;cursor:pointer}
+.scale-pick button.on{background:linear-gradient(135deg,var(--pink),var(--violet));border-color:#fff}
+.scale-legend{display:flex;justify-content:space-between;gap:16px;width:100%;max-width:560px;font-size:13px;font-weight:800;color:var(--muted)}
+.writein-host .scale-legend{font-size:clamp(14px,1.8vw,20px)}
+.scale-play{display:flex;flex-direction:column;align-items:center;gap:12px;margin:auto 0;width:100%}
+.scale-num{font-family:'Bungee',sans-serif;font-size:96px;line-height:1;background:linear-gradient(90deg,var(--cyan),var(--lime));-webkit-background-clip:text;background-clip:text;color:transparent;min-height:96px}
+.scale-num.locked{font-size:120px;animation:pop .5s cubic-bezier(.2,1.6,.4,1)}
+.scale-range{-webkit-appearance:none;appearance:none;width:100%;height:46px;background:transparent;cursor:pointer;touch-action:none}
+.scale-range::-webkit-slider-runnable-track{height:14px;border-radius:14px;background:linear-gradient(90deg,var(--pink),var(--gold),var(--good))}
+.scale-range::-moz-range-track{height:14px;border-radius:14px;background:linear-gradient(90deg,var(--pink),var(--gold),var(--good))}
+.scale-range::-webkit-slider-thumb{-webkit-appearance:none;width:42px;height:42px;margin-top:-14px;border-radius:50%;background:#fff;border:4px solid var(--violet);box-shadow:0 4px 14px rgba(0,0,0,.4)}
+.scale-range::-moz-range-thumb{width:34px;height:34px;border-radius:50%;background:#fff;border:4px solid var(--violet);box-shadow:0 4px 14px rgba(0,0,0,.4)}
+.scale-ticks{display:flex;justify-content:space-between;width:100%;padding:0 13px;font-weight:800;font-size:13px;color:var(--muted);margin-top:-8px}
+.scale-ticks span{width:16px;text-align:center}
+.bar.scale,.blabel.scale{--c:#3d8bff;--cd:#1a4cad}
+.bar.scale-win,.blabel.scale-win{--c:var(--gold);--cd:#a86f00;color:#1a1000}
+.res-close{background:radial-gradient(circle at 50% 35%,rgba(255,210,61,.3),transparent 65%)}
+.res-close .res-icon{background:var(--gold);color:#1a1000;box-shadow:0 0 60px rgba(255,210,61,.55)}
+
 @media (max-width:820px){.lobby{grid-template-columns:1fr}}
 @media (max-width:600px){
   .ans-grid{grid-template-columns:1fr}
@@ -467,7 +488,8 @@ const SAMPLE = {
 };
 function normQ(q) {
   q = q || {};
-  const type = q.type === 'text' ? 'text' : q.type === 'multi' ? 'multi' : 'mc';
+  const type = ['text', 'multi', 'scale'].includes(q.type) ? q.type : 'mc';
+  const answer = Math.min(10, Math.max(1, Math.round(+q.answer) || 5));
   // Always keep 8 answer slots; regular multiple choice only uses the first 4.
   const choices = (Array.isArray(q.choices) ? q.choices : []).map(c => String(c ?? '')).slice(0, MULTI_MAX);
   while (choices.length < MULTI_MAX) choices.push('');
@@ -478,7 +500,7 @@ function normQ(q) {
   if (correct < 0 || correct > 3) correct = 0;
   const time = TIMES.includes(+q.time) ? +q.time : 20;
   const accept = Array.isArray(q.accept) ? q.accept.join('\n') : String(q.accept || '');
-  return { type, text: String(q.text || ''), choices, correct, corrects, time, double: !!q.double, accept };
+  return { type, text: String(q.text || ''), choices, correct, corrects, answer, time, double: !!q.double, accept };
 }
 const sameSet = (a, b) => a.length === b.length && a.every(x => b.includes(x));
 function normPacket(p) {
@@ -496,6 +518,7 @@ function validate(p) {
   p.questions.forEach((q, i) => {
     if (!q.text.trim()) errs.push(`Q${i + 1}: question text is empty`);
     if (q.type === 'text') { if (!acceptList(q.accept).length) errs.push(`Q${i + 1}: add at least one accepted answer`); return; }
+    if (q.type === 'scale') return;
     if (q.type === 'multi') {
       if (q.choices.filter(c => c.trim()).length < 2) errs.push(`Q${i + 1}: needs at least 2 answers`);
       if (!q.corrects.length) errs.push(`Q${i + 1}: mark at least one answer as correct`);
@@ -510,6 +533,7 @@ function validate(p) {
 // Strip blank answer slots for play, but keep each answer's colour/shape slot.
 function compile(q) {
   if (q.type === 'text') return { type: 'text', text: q.text.trim(), accept: acceptList(q.accept), choices: [], shapes: [], correct: -1, time: q.time, double: q.double };
+  if (q.type === 'scale') return { type: 'scale', text: q.text.trim(), answer: q.answer, choices: [], shapes: [], correct: -1, time: q.time, double: q.double };
   const idx = []; q.choices.slice(0, q.type === 'multi' ? MULTI_MAX : 4).forEach((c, j) => { if (c.trim()) idx.push(j); });
   if (q.type === 'multi') return { type: 'multi', text: q.text.trim(), choices: idx.map(j => q.choices[j].trim()), shapes: idx, correct: -1,
     corrects: q.corrects.map(j => idx.indexOf(j)).filter(j => j >= 0), time: q.time, double: q.double };
@@ -612,7 +636,7 @@ function screenHostHome() {
 function qCard(q, i) {
   return `<div class="card qcard" data-q="${i}">
     <div class="qhead"><div class="row tight"><span class="qnum">Q${i + 1}</span>
-        <div class="type-tog"><button class="${q.type === 'mc' ? 'on' : ''}" data-act="setType" data-i="${i}" data-v="mc">▦ Choices</button><button class="${q.type === 'multi' ? 'on' : ''}" data-act="setType" data-i="${i}" data-v="multi">☑ Multi-select</button><button class="${q.type === 'text' ? 'on' : ''}" data-act="setType" data-i="${i}" data-v="text">✍️ Write-in</button></div></div>
+        <div class="type-tog"><button class="${q.type === 'mc' ? 'on' : ''}" data-act="setType" data-i="${i}" data-v="mc">▦ Choices</button><button class="${q.type === 'multi' ? 'on' : ''}" data-act="setType" data-i="${i}" data-v="multi">☑ Multi-select</button><button class="${q.type === 'scale' ? 'on' : ''}" data-act="setType" data-i="${i}" data-v="scale">🎚 Slider 1–10</button><button class="${q.type === 'text' ? 'on' : ''}" data-act="setType" data-i="${i}" data-v="text">✍️ Write-in</button></div></div>
       <div class="row tight">
         <select class="sel" data-bind="time" data-i="${i}" title="Time limit">${TIMES.map(t => `<option value="${t}" ${q.time === t ? 'selected' : ''}>⏱ ${t}s</option>`).join('')}</select>
         <label class="dbl ${q.double ? 'on' : ''}"><input type="checkbox" data-bind="double" data-i="${i}" ${q.double ? 'checked' : ''}> 2× pts</label>
@@ -626,7 +650,10 @@ function qCard(q, i) {
     ${q.type === 'text' ? `
     <label class="lbl">Accepted answers — one per line</label>
     <textarea class="inp" data-bind="accept" data-i="${i}" rows="3" maxlength="400" placeholder="Abraham Lincoln&#10;Lincoln&#10;Abe Lincoln">${esc(q.accept)}</textarea>
-    <p class="hint">Auto-grading forgives capitalization, punctuation, accents, a leading “the/a/an” and small spelling slips (numbers must match exactly). You'll review every submitted answer and can flip any call before points are awarded.</p>` : q.type === 'multi' ? `
+    <p class="hint">Auto-grading forgives capitalization, punctuation, accents, a leading “the/a/an” and small spelling slips (numbers must match exactly). You'll review every submitted answer and can flip any call before points are awarded.</p>` : q.type === 'scale' ? `
+    <label class="lbl">How true is it? Pick the right answer (1 = not true at all, 10 = totally true)</label>
+    <div class="scale-pick">${Array.from({ length: 10 }, (_, k) => `<button class="${q.answer === k + 1 ? 'on' : ''}" data-act="setScale" data-i="${i}" data-v="${k + 1}">${k + 1}</button>`).join('')}</div>
+    <p class="hint">Players drag a slider from 1 to 10. Exact guess = full points, off by 1 = half points, off by 2 = quarter points.</p>` : q.type === 'multi' ? `
     <div class="choice-grid">${q.choices.map((c, j) => `
       <div class="choice a${j} ${q.corrects.includes(j) ? 'correct' : ''}">
         <span class="shape">${SHAPES[j]}</span>
@@ -651,11 +678,12 @@ function screenEditor() {
     <div class="wrap narrow">
       <label class="lbl">Packet title</label>
       <input class="inp title-inp" data-bind="title" maxlength="80" value="${esc(ED.title)}" placeholder="Friday Night Trivia">
-      <p class="hint">Choice questions: tap the circle next to an answer to mark it correct (blank answers are skipped, so use 2–4). Multi-select questions: up to ${MULTI_MAX} answers, any number of them correct, and players must pick all the right ones. Write-in questions: players type their answer, bar-trivia style. Faster correct answers earn more points (500–1000, doubled on 2× questions) plus streak bonuses.</p>
+      <p class="hint">Choice questions: tap the circle next to an answer to mark it correct (blank answers are skipped, so use 2–4). Multi-select questions: up to ${MULTI_MAX} answers, any number of them correct, and players must pick all the right ones. Slider questions: players guess 1–10 how true a statement is, and closer guesses earn more. Write-in questions: players type their answer, bar-trivia style. Faster correct answers earn more points (500–1000, doubled on 2× questions) plus streak bonuses.</p>
       <div id="qlist">${ED.questions.map(qCard).join('')}</div>
       <div class="row center-row">
         <button class="btn primary" data-act="addQ">+ Multiple choice</button>
         <button class="btn" data-act="addMulti">+ Multi-select</button>
+        <button class="btn" data-act="addScale">+ Slider 1–10</button>
         <button class="btn" data-act="addTF">+ True / False</button>
         <button class="btn" data-act="addText">+ Write-in</button>
       </div>
@@ -762,7 +790,12 @@ function hostMsg(conn, msg) {
     const q = H.qs[H.qi];
     const ms = Date.now() - H.qStart;
     if (ms > q.time * 1000 + (q.type === 'mc' ? 600 : 1500)) return;
-    if (q.type === 'multi') {
+    if (q.type === 'scale') {
+      const v = Math.round(+msg.v);
+      if (!(v >= 1 && v <= 10)) return;
+      H.answers.set(p.key, { v, ms });
+      send(conn, { t: 'locked', qi: H.qi, v });
+    } else if (q.type === 'multi') {
       if (!Array.isArray(msg.cs)) return;
       const cs = [...new Set(msg.cs.map(Number))].filter(c => Number.isInteger(c) && c >= 0 && c < q.choices.length).sort((a, b) => a - b);
       if (!cs.length) return;
@@ -803,6 +836,11 @@ function qMsg(elapsed) {
 }
 function resultMsg(p) {
   const q = H.qs[H.qi];
+  if (q.type === 'scale') {
+    const a = H.answers.get(p.key);
+    return { t: 'result', qi: H.qi, ok: p.lastOk, delta: p.lastDelta, score: p.score, streak: p.streak, rank: p.rank,
+             total: H.players.size, type: q.type, answer: q.answer + ' / 10', shape: null, yours: a ? String(a.v) : '' };
+  }
   if (q.type === 'multi') {
     const label = i => SHAPES[q.shapes[i]] + ' ' + q.choices[i], a = H.answers.get(p.key);
     return { t: 'result', qi: H.qi, ok: p.lastOk, delta: p.lastDelta, score: p.score, streak: p.streak, rank: p.rank,
@@ -829,6 +867,7 @@ function syncPlayer(p) {
     case 'question': {
       const a = H.answers.get(p.key);
       send(p.conn, !a ? qMsg(Date.now() - H.qStart) : a.txt != null ? { t: 'locked', qi: H.qi, txt: a.txt }
+        : a.v != null ? { t: 'locked', qi: H.qi, v: a.v }
         : a.cs ? { t: 'locked', qi: H.qi, cs: a.cs, shapes: a.cs.map(c => H.qs[H.qi].shapes[c]) } : { t: 'locked', qi: H.qi, c: a.c, shape: H.qs[H.qi].shapes[a.c] });
       break;
     }
@@ -883,6 +922,8 @@ function beginQuestion() {
     ${q.type === 'multi' ? '<div class="center-text"><span class="pill gold">☑ Select ALL that apply</span></div>' : ''}
     <div id="answeredRow" class="answered-row"></div>
     ${q.type === 'text' ? '<div class="writein-host"><div class="wi-icon">✍️</div><div>Write your answer on your phone</div></div>'
+      : q.type === 'scale' ? `<div class="writein-host"><div class="wi-icon">🎚️</div><div>How true is it? Slide from 1 to 10 on your phone</div>
+          <div class="scale-legend"><span>1 · Not true at all</span><span>10 · Totally true</span></div></div>`
       : `<div class="ans-grid ${q.choices.length > 4 ? 'many' : ''}">${q.choices.map((c, i) => `<div class="ans a${q.shapes[i]}"><span class="shape">${SHAPES[q.shapes[i]]}</span><span class="atxt">${esc(c)}</span></div>`).join('')}</div>`}
     <div class="host-ctrl"><button class="btn sm" data-act="next">⏭ Stop timer</button><button class="btn ghost sm" data-act="endGame">End game</button></div>
   </div>`);
@@ -911,6 +952,7 @@ function endQuestion() {
   clearInterval(H.tick); clearTimeout(H.allIn);
   const q = H.qs[H.qi];
   if (q.type === 'text') return startJudging();
+  if (q.type === 'scale') return revealScale();
   const multi = q.type === 'multi';
   const isCorrect = i => multi ? q.corrects.includes(i) : i === q.correct;
   scoreQuestion(a => multi ? sameSet(a.cs, q.corrects) : a.c === q.correct);
@@ -933,7 +975,32 @@ function endQuestion() {
   </div>`);
 }
 
-// Award points: isOk(answer) decides correctness for each submitted answer.
+// Slider: exact = full points, off by 1 = half, off by 2 = quarter.
+const scaleCredit = (v, answer) => [1, .5, .25][Math.abs(v - answer)] || 0;
+
+function revealScale() {
+  const q = H.qs[H.qi];
+  scoreQuestion(a => scaleCredit(a.v, q.answer));
+  const counts = Array(10).fill(0);
+  for (const a of H.answers.values()) counts[a.v - 1]++;
+  const max = Math.max(1, ...counts), vals = [...H.answers.values()].map(a => a.v);
+  const avg = vals.length ? (vals.reduce((s, v) => s + v, 0) / vals.length).toFixed(1) : null;
+  const nExact = counts[q.answer - 1], nClose = [...H.players.values()].filter(p => !p.lastOk && p.lastDelta > 0).length;
+  render(`<div class="page fade">
+    <div class="topbar"><div class="pill">Q ${H.qi + 1}/${H.qs.length}</div><div class="row tight"><span class="pill">🎯 ${nExact} exact</span><span class="pill">${nClose} close</span></div><span></span></div>
+    <div class="qwrap"><div class="qtext-big sm">${esc(q.text)}</div></div>
+    <div class="answer-reveal"><div class="up muted">How true is it?</div><div class="big-answer">${q.answer} / 10</div>
+      ${avg ? `<div class="muted">Average guess: <b style="color:#fff">${avg}</b></div>` : ''}</div>
+    <div class="bars many">${counts.map((n, i) => `
+      <div class="barcol ${i + 1 === q.answer ? 'win' : Math.abs(i + 1 - q.answer) <= 2 ? '' : 'lose'}"><div class="bcount">${n}</div>
+        <div class="bar ${i + 1 === q.answer ? 'scale-win' : 'scale'}" style="--h:${n / max}"></div>
+        <div class="blabel ${i + 1 === q.answer ? 'scale-win' : 'scale'}">${i + 1}</div></div>`).join('')}
+    </div>
+    <div class="host-ctrl"><button class="btn primary big" data-act="next">Leaderboard →</button></div>
+  </div>`);
+}
+
+// Award points: isOk(answer) returns true/false, or a 0–1 fraction for partial credit.
 function scoreQuestion(isOk) {
   const q = H.qs[H.qi], limit = q.time * 1000;
   ranked().forEach(p => p.prevRank = p.rank);
@@ -941,12 +1008,13 @@ function scoreQuestion(isOk) {
     const a = H.answers.get(p.key);
     let delta = 0, ok = null;
     if (a) {
-      ok = !!isOk(a, p);
+      const r = isOk(a, p), frac = r === true ? 1 : +r || 0;
+      ok = frac === 1;
+      const base = q.double ? 2000 : 1000, speed = 1 - Math.min(a.ms, limit) / limit / 2;
       if (ok) {
         p.streak++; p.correctCount++;
-        const base = q.double ? 2000 : 1000;
-        delta = Math.round(base * (1 - Math.min(a.ms, limit) / limit / 2)) + Math.min(p.streak - 1, 5) * 100;
-      } else p.streak = 0;
+        delta = Math.round(base * speed) + Math.min(p.streak - 1, 5) * 100;
+      } else { p.streak = 0; delta = Math.round(base * speed * frac); }
     } else p.streak = 0;
     p.score += delta; p.lastDelta = delta; p.lastOk = ok;
   }
@@ -1247,12 +1315,13 @@ function playerMsg(m) {
       P.phase = 'getready'; P.qi = m.qi; clearInterval(P.tick);
       pScreen(`<div class="up muted">Question ${m.qi + 1} of ${m.total}</div>${m.double ? '<div class="double-badge">2× POINTS</div>' : ''}<div class="spin"></div><h1 class="h1">Get ready!</h1>`);
       break;
-    case 'question': P.phase = 'question'; P.qi = m.qi; P.q = m; P.picks = new Set(); P.deadline = Date.now() + m.remaining; screenPlayerQuestion(); break;
+    case 'question': P.phase = 'question'; P.qi = m.qi; P.q = m; P.picks = new Set(); P.scaleV = null; P.deadline = Date.now() + m.remaining; screenPlayerQuestion(); break;
     case 'locked':
       if (m.qi === P.qi && P.phase !== 'locked') {
         P.phase = 'locked';
         if (m.txt != null) screenLockedText(m.txt);
         else if (Array.isArray(m.cs)) screenLockedMulti(m.shapes || []);
+        else if (m.v != null) screenLockedScale(m.v);
         else screenLocked(m.shape != null ? m.shape : (P.q && P.q.shapes ? P.q.shapes[m.c] : 0));
       }
       break;
@@ -1280,6 +1349,13 @@ function screenPlayerQuestion() {
         <button class="btn primary big full" type="submit">Lock it in ✍️</button>
         <div class="muted sm center-text">Spelling doesn't have to be perfect. Whatever you've typed is submitted when time runs out.</div>
       </form>`
+      : q.type === 'scale' ? `<div class="scale-play">
+          <div id="scaleNum" class="scale-num">?</div>
+          <input id="scaleInp" class="scale-range" type="range" min="1" max="10" step="1" value="5" aria-label="How true is it, 1 to 10">
+          <div class="scale-ticks">${Array.from({ length: 10 }, (_, k) => `<span>${k + 1}</span>`).join('')}</div>
+          <div class="scale-legend"><span>Not true at all</span><span>Totally true</span></div>
+          <button id="lockScale" class="btn primary big full" data-act="lockScale" disabled>Drag the slider</button>
+        </div>`
       : q.type === 'multi' ? `<div class="multi-tip">☑ Select ALL that apply, then lock it in</div>
         <div class="pans-grid ${q.choices.length > 4 ? 'many' : ''}">${q.choices.map((c, i) => `<button class="pans multi a${q.shapes[i]}" data-act="toggleMulti" data-c="${i}"><span class="shape">${SHAPES[q.shapes[i]]}</span><span>${esc(c)}</span></button>`).join('')}</div>
         <button id="lockMulti" class="btn primary big full" data-act="lockMulti" disabled>Pick your answers</button>`
@@ -1299,6 +1375,7 @@ function screenPlayerQuestion() {
       const wi = $('wiInput');
       if (q.type === 'text' && wi && wi.value.trim()) { A.writein(); return; }
       if (q.type === 'multi' && P.picks && P.picks.size) { A.lockMulti(); return; }
+      if (q.type === 'scale' && P.scaleV != null) { A.lockScale(); return; }
       P.phase = 'timeout';
       pScreen(`<div style="font-size:90px">⏰</div><h1 class="h1">Time's up!</h1><div class="waiting">Waiting for results ${dots}</div>`);
     }
@@ -1309,6 +1386,11 @@ function screenPlayerQuestion() {
 function screenLocked(shape) {
   clearInterval(P.tick);
   pScreen(`<div class="locked-shape a${shape}">${SHAPES[shape]}</div><h1 class="h1">Locked in!</h1><div class="waiting">Waiting for everyone else ${dots}</div>`);
+}
+
+function screenLockedScale(v) {
+  clearInterval(P.tick);
+  pScreen(`<div class="scale-num locked">${v}</div><div class="muted">out of 10</div><h1 class="h1">Locked in!</h1><div class="waiting">Waiting for everyone else ${dots}</div>`);
 }
 
 function screenLockedMulti(shapes) {
@@ -1323,14 +1405,15 @@ function screenLockedText(txt) {
 
 function screenPlayerResult(m) {
   P.phase = 'result'; P.score = m.score; clearInterval(P.tick);
-  const ok = m.ok === true;
-  const title = ok ? 'Correct!' : m.ok === false ? 'Not quite!' : "Time's up!";
-  pScreen(`<div class="res-icon">${ok ? '✓' : '✕'}</div><h1 class="h1">${title}</h1>
-    ${ok ? `<div class="delta">+${fmt(m.delta)}</div>` : `<div class="muted">${m.type === 'multi' ? 'The correct answers were' : 'The answer was'} <b style="color:#fff">${m.shape != null ? SHAPES[m.shape] + ' ' : ''}${esc(m.answer)}</b></div>`}
-    ${!ok && m.yours ? `<div class="muted sm">${m.type === 'multi' ? `You picked ${esc(m.yours)}` : `You wrote “${esc(m.yours)}”`}</div>` : ''}
+  const ok = m.ok === true, close = !ok && m.delta > 0, good = ok || close;
+  const title = ok ? (m.type === 'scale' ? 'Spot on!' : 'Correct!') : close ? 'So close!' : m.ok === false ? 'Not quite!' : "Time's up!";
+  pScreen(`<div class="res-icon">${ok ? '✓' : close ? '≈' : '✕'}</div><h1 class="h1">${title}</h1>
+    ${good ? `<div class="delta">+${fmt(m.delta)}</div>` : ''}
+    ${!ok ? `<div class="muted">${m.type === 'multi' ? 'The correct answers were' : 'The answer was'} <b style="color:#fff">${m.shape != null ? SHAPES[m.shape] + ' ' : ''}${esc(m.answer)}</b></div>` : ''}
+    ${!ok && m.yours ? `<div class="muted sm">${m.type === 'multi' ? `You picked ${esc(m.yours)}` : m.type === 'scale' ? `You guessed ${esc(m.yours)}` : `You wrote “${esc(m.yours)}”`}</div>` : ''}
     ${m.streak >= 2 ? `<div class="pill gold">🔥 ${m.streak} in a row!</div>` : ''}
-    <div class="rank-card">You're in <b>${ordinal(m.rank)}</b> place <span class="muted">of ${m.total}</span></div>`, ok ? 'res-good' : 'res-bad');
-  snd(ok ? 'correct' : 'wrong'); vibrate(ok ? [40, 60, 40] : 250);
+    <div class="rank-card">You're in <b>${ordinal(m.rank)}</b> place <span class="muted">of ${m.total}</span></div>`, ok ? 'res-good' : close ? 'res-close' : 'res-bad');
+  snd(good ? 'correct' : 'wrong'); vibrate(good ? [40, 60, 40] : 250);
 }
 
 function screenPlayerStand(m) {
@@ -1413,6 +1496,11 @@ const A = {
     q.type = v; if (v !== 'mc' && q.time < 20) q.time = 30;
     if (v === 'multi' && !q.corrects.length) q.corrects = [q.correct];
     edDirty = true; const y = scrollY; screenEditor(); scrollTo(0, y);
+  },
+  addScale() { ED.questions.push(normQ({ type: 'scale', answer: 5, time: 20 })); edDirty = true; screenEditor(); focusLastQ(); },
+  setScale(el) {
+    const v = +el.dataset.v; ED.questions[+el.dataset.i].answer = v; edDirty = true;
+    el.parentNode.querySelectorAll('button').forEach(b => b.classList.toggle('on', +b.dataset.v === v));
   },
   addMulti() { ED.questions.push(normQ({ type: 'multi', corrects: [], time: 30 })); edDirty = true; screenEditor(); focusLastQ(); },
   toggleCorrect(el) {
@@ -1505,6 +1593,21 @@ const A = {
     if (wi) wi.blur();
     screenLockedText(txt);
   },
+  scaleMove(el) {
+    if (!P || P.phase !== 'question' || P.q.type !== 'scale') return;
+    const v = +el.value, first = P.scaleV == null;
+    if (v !== P.scaleV) { P.scaleV = v; snd('tap'); vibrate(10); }
+    const n = $('scaleNum'); if (n) n.textContent = v;
+    const b = $('lockScale'); if (b && first) { b.disabled = false; b.textContent = 'Lock it in ✓'; }
+  },
+  lockScale() {
+    if (!P || P.phase !== 'question' || P.q.type !== 'scale' || P.scaleV == null) return;
+    const v = P.scaleV;
+    P.phase = 'locked';
+    send(P.conn, { t: 'answer', qi: P.qi, v });
+    snd('tap'); vibrate(25);
+    screenLockedScale(v);
+  },
   toggleMulti(el) {
     if (!P || P.phase !== 'question' || P.q.type !== 'multi') return;
     const c = +el.dataset.c;
@@ -1548,6 +1651,7 @@ document.addEventListener('click', e => {
 document.addEventListener('input', e => {
   const t = e.target;
   if (t.id === 'jCode') { const v = t.value.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 4); if (v !== t.value) t.value = v; return; }
+  if (t.id === 'scaleInp') { A.scaleMove(t); return; }
   const b = t.dataset.bind; if (!b || !ED) return;
   const q = ED.questions[+t.dataset.i];
   if (b === 'title') ED.title = t.value;
@@ -1565,6 +1669,9 @@ document.addEventListener('change', e => {
   else return;
   edDirty = true;
 });
+
+// A tap on the slider that doesn't change its value (e.g. choosing the starting 5) still counts as a pick.
+document.addEventListener('pointerup', e => { if (e.target.id === 'scaleInp') A.scaleMove(e.target); });
 
 document.addEventListener('submit', e => {
   if (e.target.dataset.form === 'writein') { e.preventDefault(); A.writein(); }
