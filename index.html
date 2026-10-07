@@ -15,6 +15,7 @@
   --bg:#0a0720;--ink:#f5f2ff;--muted:#a49cd6;--card:rgba(255,255,255,.065);--card2:rgba(255,255,255,.1);--line:rgba(255,255,255,.13);
   --pink:#ff3d9a;--violet:#8a3dff;--cyan:#22e4ff;--lime:#b6ff3b;--gold:#ffd23d;
   --a0:#ff3d6e;--a0d:#a8133b;--a1:#3d8bff;--a1d:#1a4cad;--a2:#ffb81f;--a2d:#a86f00;--a3:#1fd39a;--a3d:#0b7e58;
+  --a4:#a35bff;--a4d:#5e23a8;--a5:#1fbfe0;--a5d:#0b6f86;--a6:#ff5fd2;--a6d:#a01f83;--a7:#8fcc1f;--a7d:#527a08;
   --good:#1fd39a;--bad:#ff3d6e;--r:18px;
 }
 *{box-sizing:border-box;margin:0;padding:0}
@@ -121,6 +122,7 @@ textarea.inp{resize:vertical;line-height:1.35}
 
 /* answer colours */
 .a0{--c:var(--a0);--cd:var(--a0d)}.a1{--c:var(--a1);--cd:var(--a1d)}.a2{--c:var(--a2);--cd:var(--a2d)}.a3{--c:var(--a3);--cd:var(--a3d)}
+.a4{--c:var(--a4);--cd:var(--a4d)}.a5{--c:var(--a5);--cd:var(--a5d)}.a6{--c:var(--a6);--cd:var(--a6d)}.a7{--c:var(--a7);--cd:var(--a7d)}
 .shape{font-variant-emoji:text;line-height:1}
 
 /* ---------- host lobby ---------- */
@@ -310,6 +312,22 @@ textarea.inp{resize:vertical;line-height:1.35}
 .achip.ok{background:rgba(31,211,154,.18);border-color:var(--good)}
 .achip.no{background:rgba(255,61,110,.12);border-color:rgba(255,61,110,.45);color:#ffb3c6}
 
+/* ---------- multi-select questions ---------- */
+.ans-grid.many{grid-template-columns:repeat(auto-fit,minmax(260px,1fr))}
+.ans-grid.many .ans{min-height:64px;padding:12px 16px;font-size:clamp(15px,1.8vw,24px)}
+.bars.many{gap:clamp(6px,1.6vw,20px)}
+.bars.many .barcol{width:clamp(30px,8vw,90px)}
+.bars.many .bcount{font-size:20px}.bars.many .blabel{font-size:15px}
+.pans-grid.many{grid-auto-rows:1fr}
+.pans-grid.many .pans{min-height:52px;flex-direction:row;font-size:15px;gap:8px;padding:8px 10px}
+.pans-grid.many .pans .shape{font-size:24px}
+.pans.multi{position:relative;transition:transform .08s,box-shadow .08s,outline-color .1s;outline:4px solid transparent;outline-offset:2px}
+.pans.multi.picked{outline-color:#fff;filter:brightness(1.1)}
+.pans.multi.picked::after{content:'✓';position:absolute;top:6px;right:8px;width:24px;height:24px;border-radius:50%;background:#fff;color:#0a0720;font-weight:900;font-size:15px;display:grid;place-items:center;text-shadow:none}
+.multi-tip{text-align:center;font-weight:800;color:var(--gold);font-size:14px}
+.locked-row{display:flex;flex-wrap:wrap;gap:10px;justify-content:center;max-width:360px}
+.locked-shape.mini{width:68px;height:68px;border-radius:18px;font-size:34px;box-shadow:0 5px 0 var(--cd)}
+
 @media (max-width:820px){.lobby{grid-template-columns:1fr}}
 @media (max-width:600px){
   .ans-grid{grid-template-columns:1fr}
@@ -337,7 +355,8 @@ textarea.inp{resize:vertical;line-height:1.35}
    ===================================================================== */
 const PREFIX = 'trivblitz-v1-';
 const MAX_PLAYERS = 15;
-const SHAPES = ['▲', '◆', '●', '■'];
+const SHAPES = ['▲', '◆', '●', '■', '★', '▼', '✚', '♠'];
+const MULTI_MAX = 8;
 const TIMES = [5, 10, 15, 20, 30, 45, 60, 90];
 const AVATARS = ['🦊','🐸','🐼','🦄','🐙','🦖','🐯','🐵','🐧','🦉','🐳','🍕','👾','🚀','🔥','⚡'];
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
@@ -448,14 +467,20 @@ const SAMPLE = {
 };
 function normQ(q) {
   q = q || {};
-  const choices = (Array.isArray(q.choices) ? q.choices : []).map(c => String(c ?? '')).slice(0, 4);
-  while (choices.length < 4) choices.push('');
+  const type = q.type === 'text' ? 'text' : q.type === 'multi' ? 'multi' : 'mc';
+  // Always keep 8 answer slots; regular multiple choice only uses the first 4.
+  const choices = (Array.isArray(q.choices) ? q.choices : []).map(c => String(c ?? '')).slice(0, MULTI_MAX);
+  while (choices.length < MULTI_MAX) choices.push('');
   let correct = Number.isInteger(q.correct) ? q.correct : 0;
+  let corrects = Array.isArray(q.corrects)
+    ? [...new Set(q.corrects.map(Number).filter(n => Number.isInteger(n) && n >= 0 && n < MULTI_MAX))].sort((a, b) => a - b)
+    : (type === 'multi' && correct >= 0 && correct < MULTI_MAX ? [correct] : []);
   if (correct < 0 || correct > 3) correct = 0;
   const time = TIMES.includes(+q.time) ? +q.time : 20;
   const accept = Array.isArray(q.accept) ? q.accept.join('\n') : String(q.accept || '');
-  return { type: q.type === 'text' ? 'text' : 'mc', text: String(q.text || ''), choices, correct, time, double: !!q.double, accept };
+  return { type, text: String(q.text || ''), choices, correct, corrects, time, double: !!q.double, accept };
 }
+const sameSet = (a, b) => a.length === b.length && a.every(x => b.includes(x));
 function normPacket(p) {
   return { id: p.id || uid(), title: String(p.title || 'Untitled packet').slice(0, 80), questions: (p.questions || []).map(normQ) };
 }
@@ -471,7 +496,13 @@ function validate(p) {
   p.questions.forEach((q, i) => {
     if (!q.text.trim()) errs.push(`Q${i + 1}: question text is empty`);
     if (q.type === 'text') { if (!acceptList(q.accept).length) errs.push(`Q${i + 1}: add at least one accepted answer`); return; }
-    if (q.choices.filter(c => c.trim()).length < 2) errs.push(`Q${i + 1}: needs at least 2 answers`);
+    if (q.type === 'multi') {
+      if (q.choices.filter(c => c.trim()).length < 2) errs.push(`Q${i + 1}: needs at least 2 answers`);
+      if (!q.corrects.length) errs.push(`Q${i + 1}: mark at least one answer as correct`);
+      else if (q.corrects.some(j => !(q.choices[j] || '').trim())) errs.push(`Q${i + 1}: an answer marked correct is blank`);
+      return;
+    }
+    if (q.choices.slice(0, 4).filter(c => c.trim()).length < 2) errs.push(`Q${i + 1}: needs at least 2 answers`);
     if (!(q.choices[q.correct] || '').trim()) errs.push(`Q${i + 1}: the answer marked correct is blank`);
   });
   return errs;
@@ -479,7 +510,9 @@ function validate(p) {
 // Strip blank answer slots for play, but keep each answer's colour/shape slot.
 function compile(q) {
   if (q.type === 'text') return { type: 'text', text: q.text.trim(), accept: acceptList(q.accept), choices: [], shapes: [], correct: -1, time: q.time, double: q.double };
-  const idx = []; q.choices.forEach((c, j) => { if (c.trim()) idx.push(j); });
+  const idx = []; q.choices.slice(0, q.type === 'multi' ? MULTI_MAX : 4).forEach((c, j) => { if (c.trim()) idx.push(j); });
+  if (q.type === 'multi') return { type: 'multi', text: q.text.trim(), choices: idx.map(j => q.choices[j].trim()), shapes: idx, correct: -1,
+    corrects: q.corrects.map(j => idx.indexOf(j)).filter(j => j >= 0), time: q.time, double: q.double };
   return { type: 'mc', text: q.text.trim(), choices: idx.map(j => q.choices[j].trim()), shapes: idx, correct: idx.indexOf(q.correct), time: q.time, double: q.double };
 }
 /* ---------- write-in auto-grading ---------- */
@@ -579,7 +612,7 @@ function screenHostHome() {
 function qCard(q, i) {
   return `<div class="card qcard" data-q="${i}">
     <div class="qhead"><div class="row tight"><span class="qnum">Q${i + 1}</span>
-        <div class="type-tog"><button class="${q.type === 'mc' ? 'on' : ''}" data-act="setType" data-i="${i}" data-v="mc">▦ Choices</button><button class="${q.type === 'text' ? 'on' : ''}" data-act="setType" data-i="${i}" data-v="text">✍️ Write-in</button></div></div>
+        <div class="type-tog"><button class="${q.type === 'mc' ? 'on' : ''}" data-act="setType" data-i="${i}" data-v="mc">▦ Choices</button><button class="${q.type === 'multi' ? 'on' : ''}" data-act="setType" data-i="${i}" data-v="multi">☑ Multi-select</button><button class="${q.type === 'text' ? 'on' : ''}" data-act="setType" data-i="${i}" data-v="text">✍️ Write-in</button></div></div>
       <div class="row tight">
         <select class="sel" data-bind="time" data-i="${i}" title="Time limit">${TIMES.map(t => `<option value="${t}" ${q.time === t ? 'selected' : ''}>⏱ ${t}s</option>`).join('')}</select>
         <label class="dbl ${q.double ? 'on' : ''}"><input type="checkbox" data-bind="double" data-i="${i}" ${q.double ? 'checked' : ''}> 2× pts</label>
@@ -593,8 +626,16 @@ function qCard(q, i) {
     ${q.type === 'text' ? `
     <label class="lbl">Accepted answers — one per line</label>
     <textarea class="inp" data-bind="accept" data-i="${i}" rows="3" maxlength="400" placeholder="Abraham Lincoln&#10;Lincoln&#10;Abe Lincoln">${esc(q.accept)}</textarea>
-    <p class="hint">Auto-grading forgives capitalization, punctuation, accents, a leading “the/a/an” and small spelling slips (numbers must match exactly). You'll review every submitted answer and can flip any call before points are awarded.</p>` : `
+    <p class="hint">Auto-grading forgives capitalization, punctuation, accents, a leading “the/a/an” and small spelling slips (numbers must match exactly). You'll review every submitted answer and can flip any call before points are awarded.</p>` : q.type === 'multi' ? `
     <div class="choice-grid">${q.choices.map((c, j) => `
+      <div class="choice a${j} ${q.corrects.includes(j) ? 'correct' : ''}">
+        <span class="shape">${SHAPES[j]}</span>
+        <input class="cinp" data-bind="choice" data-i="${i}" data-j="${j}" maxlength="90" value="${esc(c)}" placeholder="Answer ${j + 1}${j > 1 ? ' (optional)' : ''}">
+        <button class="mark" data-act="toggleCorrect" data-i="${i}" data-j="${j}" title="Toggle correct">${q.corrects.includes(j) ? '✓' : ''}</button>
+      </div>`).join('')}
+    </div>
+    <p class="hint">Tap the circles to mark <b>every</b> correct answer (up to ${MULTI_MAX} options; blanks are skipped). Players must pick exactly the right set to score.</p>` : `
+    <div class="choice-grid">${q.choices.slice(0, 4).map((c, j) => `
       <div class="choice a${j} ${q.correct === j ? 'correct' : ''}">
         <span class="shape">${SHAPES[j]}</span>
         <input class="cinp" data-bind="choice" data-i="${i}" data-j="${j}" maxlength="90" value="${esc(c)}" placeholder="Answer ${j + 1}${j > 1 ? ' (optional)' : ''}">
@@ -610,10 +651,11 @@ function screenEditor() {
     <div class="wrap narrow">
       <label class="lbl">Packet title</label>
       <input class="inp title-inp" data-bind="title" maxlength="80" value="${esc(ED.title)}" placeholder="Friday Night Trivia">
-      <p class="hint">Choice questions: tap the circle next to an answer to mark it correct (blank answers are skipped, so use 2–4). Write-in questions: players type their answer, bar-trivia style. Faster correct answers earn more points (500–1000, doubled on 2× questions) plus streak bonuses.</p>
+      <p class="hint">Choice questions: tap the circle next to an answer to mark it correct (blank answers are skipped, so use 2–4). Multi-select questions: up to ${MULTI_MAX} answers, any number of them correct, and players must pick all the right ones. Write-in questions: players type their answer, bar-trivia style. Faster correct answers earn more points (500–1000, doubled on 2× questions) plus streak bonuses.</p>
       <div id="qlist">${ED.questions.map(qCard).join('')}</div>
       <div class="row center-row">
         <button class="btn primary" data-act="addQ">+ Multiple choice</button>
+        <button class="btn" data-act="addMulti">+ Multi-select</button>
         <button class="btn" data-act="addTF">+ True / False</button>
         <button class="btn" data-act="addText">+ Write-in</button>
       </div>
@@ -719,8 +761,14 @@ function hostMsg(conn, msg) {
     if (H.phase !== 'question' || msg.qi !== H.qi || H.answers.has(p.key)) return;
     const q = H.qs[H.qi];
     const ms = Date.now() - H.qStart;
-    if (ms > q.time * 1000 + (q.type === 'text' ? 1500 : 600)) return;
-    if (q.type === 'text') {
+    if (ms > q.time * 1000 + (q.type === 'mc' ? 600 : 1500)) return;
+    if (q.type === 'multi') {
+      if (!Array.isArray(msg.cs)) return;
+      const cs = [...new Set(msg.cs.map(Number))].filter(c => Number.isInteger(c) && c >= 0 && c < q.choices.length).sort((a, b) => a - b);
+      if (!cs.length) return;
+      H.answers.set(p.key, { cs, ms });
+      send(conn, { t: 'locked', qi: H.qi, cs, shapes: cs.map(c => q.shapes[c]) });
+    } else if (q.type === 'text') {
       const txt = String(msg.txt || '').trim().replace(/\s+/g, ' ').slice(0, 60);
       if (!txt) return;
       H.answers.set(p.key, { txt, ms });
@@ -755,6 +803,12 @@ function qMsg(elapsed) {
 }
 function resultMsg(p) {
   const q = H.qs[H.qi];
+  if (q.type === 'multi') {
+    const label = i => SHAPES[q.shapes[i]] + ' ' + q.choices[i], a = H.answers.get(p.key);
+    return { t: 'result', qi: H.qi, ok: p.lastOk, delta: p.lastDelta, score: p.score, streak: p.streak, rank: p.rank,
+             total: H.players.size, type: q.type, answer: q.corrects.map(label).join(', '), shape: null,
+             yours: a ? a.cs.map(label).join(', ') : '' };
+  }
   return { t: 'result', qi: H.qi, ok: p.lastOk, delta: p.lastDelta, score: p.score, streak: p.streak, rank: p.rank,
            total: H.players.size, type: q.type,
            answer: q.type === 'text' ? q.accept[0] : q.choices[q.correct], shape: q.type === 'text' ? null : q.shapes[q.correct],
@@ -774,7 +828,8 @@ function syncPlayer(p) {
     case 'getready': send(p.conn, { t: 'getready', qi: H.qi, total: H.qs.length, double: H.qs[H.qi].double }); break;
     case 'question': {
       const a = H.answers.get(p.key);
-      send(p.conn, !a ? qMsg(Date.now() - H.qStart) : a.txt != null ? { t: 'locked', qi: H.qi, txt: a.txt } : { t: 'locked', qi: H.qi, c: a.c, shape: H.qs[H.qi].shapes[a.c] });
+      send(p.conn, !a ? qMsg(Date.now() - H.qStart) : a.txt != null ? { t: 'locked', qi: H.qi, txt: a.txt }
+        : a.cs ? { t: 'locked', qi: H.qi, cs: a.cs, shapes: a.cs.map(c => H.qs[H.qi].shapes[c]) } : { t: 'locked', qi: H.qi, c: a.c, shape: H.qs[H.qi].shapes[a.c] });
       break;
     }
     case 'judge': send(p.conn, { t: 'judging' }); break;
@@ -825,9 +880,10 @@ function beginQuestion() {
       <div class="pill"><span id="acount">0</span>&nbsp;/&nbsp;<span id="atotal">${activeCount()}</span>&nbsp;answered</div>
     </div>
     <div class="qwrap card"><div class="qtext-big">${esc(q.text)}</div></div>
+    ${q.type === 'multi' ? '<div class="center-text"><span class="pill gold">☑ Select ALL that apply</span></div>' : ''}
     <div id="answeredRow" class="answered-row"></div>
     ${q.type === 'text' ? '<div class="writein-host"><div class="wi-icon">✍️</div><div>Write your answer on your phone</div></div>'
-      : `<div class="ans-grid">${q.choices.map((c, i) => `<div class="ans a${q.shapes[i]}"><span class="shape">${SHAPES[q.shapes[i]]}</span><span class="atxt">${esc(c)}</span></div>`).join('')}</div>`}
+      : `<div class="ans-grid ${q.choices.length > 4 ? 'many' : ''}">${q.choices.map((c, i) => `<div class="ans a${q.shapes[i]}"><span class="shape">${SHAPES[q.shapes[i]]}</span><span class="atxt">${esc(c)}</span></div>`).join('')}</div>`}
     <div class="host-ctrl"><button class="btn sm" data-act="next">⏭ Stop timer</button><button class="btn ghost sm" data-act="endGame">End game</button></div>
   </div>`);
   const total = q.time * 1000; let lastSec = null;
@@ -855,20 +911,24 @@ function endQuestion() {
   clearInterval(H.tick); clearTimeout(H.allIn);
   const q = H.qs[H.qi];
   if (q.type === 'text') return startJudging();
-  scoreQuestion(a => a.c === q.correct);
+  const multi = q.type === 'multi';
+  const isCorrect = i => multi ? q.corrects.includes(i) : i === q.correct;
+  scoreQuestion(a => multi ? sameSet(a.cs, q.corrects) : a.c === q.correct);
 
   const counts = q.choices.map(() => 0);
-  for (const a of H.answers.values()) counts[a.c]++;
+  for (const a of H.answers.values()) { if (multi) a.cs.forEach(c => counts[c]++); else counts[a.c]++; }
   const max = Math.max(1, ...counts);
+  const nOk = multi ? [...H.players.values()].filter(p => p.lastOk).length : counts[q.correct];
+  const many = q.choices.length > 4 ? 'many' : '';
   render(`<div class="page fade">
-    <div class="topbar"><div class="pill">Q ${H.qi + 1}/${H.qs.length}</div><div class="pill">✓ ${counts[q.correct]} of ${H.players.size} got it right</div><span></span></div>
+    <div class="topbar"><div class="pill">Q ${H.qi + 1}/${H.qs.length}</div><div class="pill">✓ ${nOk} of ${H.players.size} got ${multi ? 'them all' : 'it'} right</div><span></span></div>
     <div class="qwrap"><div class="qtext-big sm">${esc(q.text)}</div></div>
-    <div class="bars">${q.choices.map((c, i) => `
-      <div class="barcol ${i === q.correct ? 'win' : 'lose'}"><div class="bcount">${counts[i]}</div>
+    <div class="bars ${many}">${q.choices.map((c, i) => `
+      <div class="barcol ${isCorrect(i) ? 'win' : 'lose'}"><div class="bcount">${counts[i]}</div>
         <div class="bar a${q.shapes[i]}" style="--h:${counts[i] / max}"></div>
-        <div class="blabel a${q.shapes[i]}">${SHAPES[q.shapes[i]]}${i === q.correct ? ' ✓' : ''}</div></div>`).join('')}
+        <div class="blabel a${q.shapes[i]}">${SHAPES[q.shapes[i]]}${isCorrect(i) ? ' ✓' : ''}</div></div>`).join('')}
     </div>
-    <div class="ans-grid reveal">${q.choices.map((c, i) => `<div class="ans a${q.shapes[i]} ${i === q.correct ? 'correct' : 'dim'}"><span class="shape">${SHAPES[q.shapes[i]]}</span><span class="atxt">${esc(c)}</span>${i === q.correct ? '<span class="shape">✓</span>' : ''}</div>`).join('')}</div>
+    <div class="ans-grid reveal ${many}">${q.choices.map((c, i) => `<div class="ans a${q.shapes[i]} ${isCorrect(i) ? 'correct' : 'dim'}"><span class="shape">${SHAPES[q.shapes[i]]}</span><span class="atxt">${esc(c)}</span>${isCorrect(i) ? '<span class="shape">✓</span>' : ''}</div>`).join('')}</div>
     <div class="host-ctrl"><button class="btn primary big" data-act="next">Leaderboard →</button></div>
   </div>`);
 }
@@ -1187,11 +1247,12 @@ function playerMsg(m) {
       P.phase = 'getready'; P.qi = m.qi; clearInterval(P.tick);
       pScreen(`<div class="up muted">Question ${m.qi + 1} of ${m.total}</div>${m.double ? '<div class="double-badge">2× POINTS</div>' : ''}<div class="spin"></div><h1 class="h1">Get ready!</h1>`);
       break;
-    case 'question': P.phase = 'question'; P.qi = m.qi; P.q = m; P.deadline = Date.now() + m.remaining; screenPlayerQuestion(); break;
+    case 'question': P.phase = 'question'; P.qi = m.qi; P.q = m; P.picks = new Set(); P.deadline = Date.now() + m.remaining; screenPlayerQuestion(); break;
     case 'locked':
       if (m.qi === P.qi && P.phase !== 'locked') {
         P.phase = 'locked';
         if (m.txt != null) screenLockedText(m.txt);
+        else if (Array.isArray(m.cs)) screenLockedMulti(m.shapes || []);
         else screenLocked(m.shape != null ? m.shape : (P.q && P.q.shapes ? P.q.shapes[m.c] : 0));
       }
       break;
@@ -1219,6 +1280,9 @@ function screenPlayerQuestion() {
         <button class="btn primary big full" type="submit">Lock it in ✍️</button>
         <div class="muted sm center-text">Spelling doesn't have to be perfect. Whatever you've typed is submitted when time runs out.</div>
       </form>`
+      : q.type === 'multi' ? `<div class="multi-tip">☑ Select ALL that apply, then lock it in</div>
+        <div class="pans-grid ${q.choices.length > 4 ? 'many' : ''}">${q.choices.map((c, i) => `<button class="pans multi a${q.shapes[i]}" data-act="toggleMulti" data-c="${i}"><span class="shape">${SHAPES[q.shapes[i]]}</span><span>${esc(c)}</span></button>`).join('')}</div>
+        <button id="lockMulti" class="btn primary big full" data-act="lockMulti" disabled>Pick your answers</button>`
       : `<div class="pans-grid">${q.choices.map((c, i) => `<button class="pans a${q.shapes[i]}" data-act="answer" data-c="${i}"><span class="shape">${SHAPES[q.shapes[i]]}</span><span>${esc(c)}</span></button>`).join('')}</div>`}
   </div>`);
   if (q.type === 'text') { const wi = $('wiInput'); if (wi) try { wi.focus(); } catch (e) {} }
@@ -1234,6 +1298,7 @@ function screenPlayerQuestion() {
       clearInterval(P.tick);
       const wi = $('wiInput');
       if (q.type === 'text' && wi && wi.value.trim()) { A.writein(); return; }
+      if (q.type === 'multi' && P.picks && P.picks.size) { A.lockMulti(); return; }
       P.phase = 'timeout';
       pScreen(`<div style="font-size:90px">⏰</div><h1 class="h1">Time's up!</h1><div class="waiting">Waiting for results ${dots}</div>`);
     }
@@ -1246,6 +1311,11 @@ function screenLocked(shape) {
   pScreen(`<div class="locked-shape a${shape}">${SHAPES[shape]}</div><h1 class="h1">Locked in!</h1><div class="waiting">Waiting for everyone else ${dots}</div>`);
 }
 
+function screenLockedMulti(shapes) {
+  clearInterval(P.tick);
+  pScreen(`<div class="locked-row">${shapes.map(s => `<div class="locked-shape mini a${s}">${SHAPES[s]}</div>`).join('')}</div><h1 class="h1">Locked in!</h1><div class="waiting">Waiting for everyone else ${dots}</div>`);
+}
+
 function screenLockedText(txt) {
   clearInterval(P.tick);
   pScreen(`<div style="font-size:64px">✍️</div><div class="locked-txt">“${esc(txt)}”</div><h1 class="h1">Locked in!</h1><div class="waiting">Waiting for everyone else ${dots}</div>`);
@@ -1256,8 +1326,8 @@ function screenPlayerResult(m) {
   const ok = m.ok === true;
   const title = ok ? 'Correct!' : m.ok === false ? 'Not quite!' : "Time's up!";
   pScreen(`<div class="res-icon">${ok ? '✓' : '✕'}</div><h1 class="h1">${title}</h1>
-    ${ok ? `<div class="delta">+${fmt(m.delta)}</div>` : `<div class="muted">The answer was <b style="color:#fff">${m.shape != null ? SHAPES[m.shape] + ' ' : ''}${esc(m.answer)}</b></div>`}
-    ${!ok && m.yours ? `<div class="muted sm">You wrote “${esc(m.yours)}”</div>` : ''}
+    ${ok ? `<div class="delta">+${fmt(m.delta)}</div>` : `<div class="muted">${m.type === 'multi' ? 'The correct answers were' : 'The answer was'} <b style="color:#fff">${m.shape != null ? SHAPES[m.shape] + ' ' : ''}${esc(m.answer)}</b></div>`}
+    ${!ok && m.yours ? `<div class="muted sm">${m.type === 'multi' ? `You picked ${esc(m.yours)}` : `You wrote “${esc(m.yours)}”`}</div>` : ''}
     ${m.streak >= 2 ? `<div class="pill gold">🔥 ${m.streak} in a row!</div>` : ''}
     <div class="rank-card">You're in <b>${ordinal(m.rank)}</b> place <span class="muted">of ${m.total}</span></div>`, ok ? 'res-good' : 'res-bad');
   snd(ok ? 'correct' : 'wrong'); vibrate(ok ? [40, 60, 40] : 250);
@@ -1340,8 +1410,17 @@ const A = {
   setType(el) {
     const q = ED.questions[+el.dataset.i], v = el.dataset.v;
     if (q.type === v) return;
-    q.type = v; if (v === 'text' && q.time < 20) q.time = 30;
+    q.type = v; if (v !== 'mc' && q.time < 20) q.time = 30;
+    if (v === 'multi' && !q.corrects.length) q.corrects = [q.correct];
     edDirty = true; const y = scrollY; screenEditor(); scrollTo(0, y);
+  },
+  addMulti() { ED.questions.push(normQ({ type: 'multi', corrects: [], time: 30 })); edDirty = true; screenEditor(); focusLastQ(); },
+  toggleCorrect(el) {
+    const q = ED.questions[+el.dataset.i], j = +el.dataset.j;
+    q.corrects = q.corrects.includes(j) ? q.corrects.filter(x => x !== j) : [...q.corrects, j].sort((a, b) => a - b);
+    edDirty = true;
+    const on = q.corrects.includes(j), box = el.closest('.choice');
+    box.classList.toggle('correct', on); el.textContent = on ? '✓' : '';
   },
   addTF() { ED.questions.push(normQ({ choices: ['True', 'False'], correct: 0, time: 10 })); edDirty = true; screenEditor(); focusLastQ(); },
   qMove(el) {
@@ -1425,6 +1504,24 @@ const A = {
     snd('tap'); vibrate(25);
     if (wi) wi.blur();
     screenLockedText(txt);
+  },
+  toggleMulti(el) {
+    if (!P || P.phase !== 'question' || P.q.type !== 'multi') return;
+    const c = +el.dataset.c;
+    if (P.picks.has(c)) P.picks.delete(c); else P.picks.add(c);
+    el.classList.toggle('picked', P.picks.has(c));
+    const b = $('lockMulti'), n = P.picks.size;
+    if (b) { b.disabled = !n; b.textContent = n ? `Lock in ${n} answer${n === 1 ? '' : 's'} ✓` : 'Pick your answers'; }
+    snd('tap'); vibrate(15);
+  },
+  lockMulti() {
+    if (!P || P.phase !== 'question' || P.q.type !== 'multi') return;
+    const cs = [...P.picks].sort((a, b) => a - b);
+    if (!cs.length) { toast('Pick at least one answer', 'bad'); return; }
+    P.phase = 'locked';
+    send(P.conn, { t: 'answer', qi: P.qi, cs });
+    snd('tap'); vibrate(25);
+    screenLockedMulti(cs.map(c => P.q.shapes[c]));
   },
   answer(el) {
     if (!P || P.phase !== 'question') return;
