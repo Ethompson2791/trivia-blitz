@@ -504,7 +504,7 @@ function normQ(q) {
 }
 const sameSet = (a, b) => a.length === b.length && a.every(x => b.includes(x));
 function normPacket(p) {
-  return { id: p.id || uid(), title: String(p.title || 'Untitled packet').slice(0, 80), questions: (p.questions || []).map(normQ) };
+  return { id: p.id || uid(), title: String(p.title || 'Untitled packet').slice(0, 80), speed: p.speed !== false, questions: (p.questions || []).map(normQ) };
 }
 function getPackets() {
   let p = store.get('tb_packets', null);
@@ -621,7 +621,7 @@ function screenHostHome() {
       <div class="pack-grid">${packs.length ? packs.map(p => `
         <div class="card pack">
           <div class="pack-title">${esc(p.title || 'Untitled')}</div>
-          <div class="muted sm">${p.questions.length} question${p.questions.length === 1 ? '' : 's'} · ${p.questions.reduce((s, q) => s + q.time, 0)}s of answer time</div>
+          <div class="muted sm">${p.questions.length} question${p.questions.length === 1 ? '' : 's'} · ${p.questions.reduce((s, q) => s + q.time, 0)}s of answer time · ${p.speed ? '⚡ speed bonus' : 'no speed bonus'}</div>
           <div class="row">
             <button class="btn primary sm" data-act="hostPacket" data-id="${p.id}">▶ Host</button>
             <button class="btn sm" data-act="editPacket" data-id="${p.id}">✎ Edit</button>
@@ -678,7 +678,9 @@ function screenEditor() {
     <div class="wrap narrow">
       <label class="lbl">Packet title</label>
       <input class="inp title-inp" data-bind="title" maxlength="80" value="${esc(ED.title)}" placeholder="Friday Night Trivia">
-      <p class="hint">Choice questions: tap the circle next to an answer to mark it correct (blank answers are skipped, so use 2–4). Multi-select questions: up to ${MULTI_MAX} answers, any number of them correct, and players must pick all the right ones. Slider questions: players guess 1–10 how true a statement is, and closer guesses earn more. Write-in questions: players type their answer, bar-trivia style. Faster correct answers earn more points (500–1000, doubled on 2× questions) plus streak bonuses.</p>
+      <div class="row"><label class="dbl ${ED.speed ? 'on' : ''}"><input type="checkbox" data-bind="speed" ${ED.speed ? 'checked' : ''}> ⚡ Faster answers score more</label>
+        <span class="hint">Off = every correct answer is worth full points, no matter how fast. You can also change this in the lobby.</span></div>
+      <p class="hint">Choice questions: tap the circle next to an answer to mark it correct (blank answers are skipped, so use 2–4). Multi-select questions: up to ${MULTI_MAX} answers, any number of them correct, and players must pick all the right ones. Slider questions: players guess 1–10 how true a statement is, and closer guesses earn more. Write-in questions: players type their answer, bar-trivia style. Correct answers earn up to 1000 points (doubled on 2× questions) plus streak bonuses. With the speed bonus on, slower answers earn less (down to 500).</p>
       <div id="qlist">${ED.questions.map(qCard).join('')}</div>
       <div class="row center-row">
         <button class="btn primary" data-act="addQ">+ Multiple choice</button>
@@ -718,7 +720,7 @@ function startHosting(packet) {
   const errs = validate(packet);
   if (errs.length) { toast(errs[0], 'bad'); return; }
   if (!PeerCtor) { toast('Could not load the networking library. Check your internet connection and reload.', 'bad'); return; }
-  H = { packet, qs: packet.questions.map(compile), code: null, peer: null, players: new Map(), shown: new Set(),
+  H = { packet, qs: packet.questions.map(compile), speed: packet.speed !== false, code: null, peer: null, players: new Map(), shown: new Set(),
         phase: 'opening', qi: -1, answers: new Map(), qStart: 0 };
   render(`<div class="screen fade"><div class="spin"></div><div class="muted">Opening a room…</div></div>`);
   openRoom(0);
@@ -1010,7 +1012,7 @@ function scoreQuestion(isOk) {
     if (a) {
       const r = isOk(a, p), frac = r === true ? 1 : +r || 0;
       ok = frac === 1;
-      const base = q.double ? 2000 : 1000, speed = 1 - Math.min(a.ms, limit) / limit / 2;
+      const base = q.double ? 2000 : 1000, speed = H.speed ? 1 - Math.min(a.ms, limit) / limit / 2 : 1;
       if (ok) {
         p.streak++; p.correctCount++;
         delta = Math.round(base * speed) + Math.min(p.streak - 1, 5) * 100;
@@ -1179,6 +1181,7 @@ function screenHostLobby() {
       <div class="card lobby-players">
         <div class="head-row"><h2 class="h2">Players</h2><span class="pill" id="pcount">0/${MAX_PLAYERS}</span></div>
         <div id="plist" class="plist"></div>
+        <button id="speedBtn" class="dbl ${H.speed ? 'on' : ''}" data-act="toggleSpeed" style="background:none;color:inherit;justify-content:center">${speedLabel()}</button>
         <button id="startBtn" class="btn primary big full" data-act="next">Start game ▶</button>
         <div class="muted sm center-text">Tip: press <b>Space</b> to advance through the game.</div>
       </div>
@@ -1188,6 +1191,8 @@ function screenHostLobby() {
   }
   renderPlist();
 }
+
+function speedLabel() { return H.speed ? '⚡ Speed bonus ON: faster answers score more' : '⏸ Speed bonus OFF: every correct answer scores full points'; }
 
 function renderPlist() {
   const el = $('plist'); if (!el) return;
@@ -1453,13 +1458,13 @@ const A = {
   join() { doJoin(); },
   leave() { if (!P) return; send(P.conn, { t: 'leave' }); sess.del('tb_sess'); cleanupPlayer(); P = null; screenHome(); },
 
-  newPacket() { ED = { id: uid(), title: '', questions: [normQ({})] }; edDirty = false; screenEditor(); },
+  newPacket() { ED = { id: uid(), title: '', speed: true, questions: [normQ({})] }; edDirty = false; screenEditor(); },
   editPacket(el) { const p = getPackets().find(x => x.id === el.dataset.id); if (!p) return; ED = clone(p); edDirty = false; screenEditor(); },
   hostPacket(el) { const p = getPackets().find(x => x.id === el.dataset.id); if (p) startHosting(p); },
   exportPacket(el) {
     const p = getPackets().find(x => x.id === el.dataset.id); if (!p) return;
     const name = (p.title || 'packet').replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '-').toLowerCase() || 'packet';
-    download(name + '.json', JSON.stringify({ title: p.title, questions: p.questions }, null, 2));
+    download(name + '.json', JSON.stringify({ title: p.title, speed: p.speed, questions: p.questions }, null, 2));
   },
   delPacket(el) {
     const packs = getPackets(), p = packs.find(x => x.id === el.dataset.id);
@@ -1540,6 +1545,14 @@ const A = {
       case 'leaderboard': nextQuestion(); break;
     }
   },
+  toggleSpeed() {
+    if (!H || H.phase !== 'lobby') return;
+    H.speed = !H.speed; H.packet.speed = H.speed;
+    const packs = getPackets(), p = packs.find(x => x.id === H.packet.id);
+    if (p) { p.speed = H.speed; savePackets(packs); } // remember it for next time
+    const b = $('speedBtn'); if (b) { b.classList.toggle('on', H.speed); b.textContent = speedLabel(); }
+    snd('tap');
+  },
   endGame() { if (H && confirm('End the game now and show final results?')) showFinal(); },
   kick(el) {
     const p = H && H.players.get(el.dataset.k); if (!p) return;
@@ -1552,7 +1565,7 @@ const A = {
     const sel = $('nextPack');
     if (sel) {
       const f = getPackets().find(p => p.id === sel.value);
-      if (f) { const errs = validate(f); if (errs.length) return toast(errs[0], 'bad'); H.packet = f; H.qs = f.questions.map(compile); }
+      if (f && f.id !== H.packet.id) { const errs = validate(f); if (errs.length) return toast(errs[0], 'bad'); H.packet = f; H.qs = f.questions.map(compile); H.speed = f.speed; }
     }
     for (const [k, p] of H.players) {
       if (!p.connected) { H.players.delete(k); continue; }
@@ -1663,6 +1676,7 @@ document.addEventListener('input', e => {
 });
 document.addEventListener('change', e => {
   const t = e.target, b = t.dataset.bind; if (!b || !ED) return;
+  if (b === 'speed') { ED.speed = t.checked; t.closest('.dbl').classList.toggle('on', t.checked); edDirty = true; return; }
   const q = ED.questions[+t.dataset.i];
   if (b === 'time') q.time = +t.value;
   else if (b === 'double') { q.double = t.checked; t.closest('.dbl').classList.toggle('on', t.checked); }
