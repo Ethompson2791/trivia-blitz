@@ -870,7 +870,7 @@ function finalMsg(p) { return { t: 'final', rank: p.rank, score: p.score, total:
 function syncPlayer(p) {
   switch (H.phase) {
     case 'lobby': send(p.conn, { t: 'lobby', count: H.players.size }); break;
-    case 'getready': send(p.conn, { t: 'getready', qi: H.qi, total: H.qs.length, double: H.qs[H.qi].double }); break;
+    case 'getready': send(p.conn, readyMsg()); break;
     case 'question': {
       const a = H.answers.get(p.key);
       send(p.conn, !a ? qMsg(Date.now() - H.qStart) : a.txt != null ? { t: 'locked', qi: H.qi, txt: a.txt }
@@ -902,17 +902,24 @@ function nextQuestion() {
   if (H.qi >= H.qs.length) return showFinal();
   H.answers = new Map(); H.phase = 'getready';
   const q = H.qs[H.qi];
-  bcast({ t: 'getready', qi: H.qi, total: H.qs.length, double: q.double });
-  render(`<div class="page center-page fade">
-    <div class="up muted" style="font-size:18px">Question ${H.qi + 1} of ${H.qs.length}</div>
-    ${q.double ? '<div class="double-badge">2× POINTS</div>' : ''}
-    <div id="cdNum" class="cd pop">3</div><div class="muted" style="font-weight:700">Get ready…</div></div>`);
-  let n = 3; snd('tick');
-  H.cd = setInterval(() => {
-    n--;
-    if (n > 0) { const el = $('cdNum'); if (el) { el.textContent = n; el.classList.remove('pop'); void el.offsetWidth; el.classList.add('pop'); } snd('tick'); }
-    else { clearInterval(H.cd); beginQuestion(); }
-  }, 1000);
+  bcast(readyMsg());
+  // Preview: show the question only; the host advances to reveal options and start the timer.
+  render(`<div class="page fade">
+    <div class="topbar"><div class="pill">Q ${H.qi + 1}/${H.qs.length}</div><div class="pill">⏱ ${q.time}s</div><span></span></div>
+    <div class="center-page">
+      <div class="up muted" style="font-size:20px">Question ${H.qi + 1} of ${H.qs.length}</div>
+      <div class="row" style="justify-content:center"><span class="pill gold">${TYPE_LABELS[q.type]}</span>${q.double ? '<div class="double-badge">2× POINTS</div>' : ''}</div>
+      <div class="qwrap card pop" style="width:100%;max-width:1100px"><div class="qtext-big">${esc(q.text)}</div></div>
+      <div class="muted" style="font-weight:700">${q.type === 'text' ? 'Answers are typed on phones' : q.type === 'scale' ? 'Answers are given on a 1–10 slider' : 'Answer options appear when the timer starts'}</div>
+    </div>
+    <div class="host-ctrl"><button class="btn primary big" data-act="next">Show answers &amp; start timer ▶</button><button class="btn ghost sm" data-act="endGame">End game</button></div>
+  </div>`);
+  snd('reveal');
+}
+const TYPE_LABELS = { mc: '▦ Multiple choice', multi: '☑ Multi-select: pick ALL that apply', text: '✍️ Write-in', scale: '🎚️ Slider 1–10' };
+function readyMsg() {
+  const q = H.qs[H.qi];
+  return { t: 'getready', qi: H.qi, total: H.qs.length, double: q.double, text: q.text, label: TYPE_LABELS[q.type] };
 }
 
 function beginQuestion() {
@@ -1327,7 +1334,11 @@ function playerMsg(m) {
       break;
     case 'getready':
       P.phase = 'getready'; P.qi = m.qi; clearInterval(P.tick);
-      pScreen(`<div class="up muted">Question ${m.qi + 1} of ${m.total}</div>${m.double ? '<div class="double-badge">2× POINTS</div>' : ''}<div class="spin"></div><h1 class="h1">Get ready!</h1>`);
+      pScreen(`<div class="up muted">Question ${m.qi + 1} of ${m.total}</div>${m.double ? '<div class="double-badge">2× POINTS</div>' : ''}
+        ${m.label ? `<div class="pill gold">${esc(m.label)}</div>` : ''}
+        ${m.text ? `<div class="pq-text">${esc(m.text)}</div>` : '<h1 class="h1">Get ready!</h1>'}
+        <div class="waiting">Answers coming up ${dots}</div>`);
+      vibrate(30);
       break;
     case 'question': P.phase = 'question'; P.qi = m.qi; P.q = m; P.picks = new Set(); P.scaleV = null; P.deadline = Date.now() + m.remaining; screenPlayerQuestion(); break;
     case 'locked':
@@ -1548,6 +1559,7 @@ const A = {
     if (!H) return;
     switch (H.phase) {
       case 'lobby': startGame(); break;
+      case 'getready': beginQuestion(); break;
       case 'question': endQuestion(); break;
       case 'judge': finishJudging(); break;
       case 'reveal': showLeaderboard(); break;
