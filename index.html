@@ -88,7 +88,9 @@ textarea.inp{resize:vertical;line-height:1.35}
 .icon-btn:hover{background:rgba(255,255,255,.12)}
 .icon-btn.danger{color:#ff9fb9}
 #stopBtn{position:fixed;left:12px;bottom:12px;z-index:90;background:rgba(20,14,55,.75);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);color:#ff9fb9}
-#stopBtn[hidden]{display:none}
+#endBtn{position:fixed;top:12px;right:60px;z-index:90;height:40px;border-radius:999px;background:rgba(20,14,55,.75);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px)}
+#stopBtn[hidden],#endBtn[hidden]{display:none}
+body.ingame .topbar{padding-right:180px}
 #muteBtn{position:fixed;top:12px;right:12px;z-index:90;width:40px;height:40px;border-radius:50%;border:1px solid var(--line);background:rgba(20,14,55,.7);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);cursor:pointer;font-size:18px}
 
 /* ---------- home ---------- */
@@ -372,6 +374,7 @@ textarea.inp{resize:vertical;line-height:1.35}
 <div class="bg"><div class="orb o1"></div><div class="orb o2"></div><div class="floor"></div></div>
 <button id="muteBtn" data-act="mute" title="Sound on/off">🔊</button>
 <button id="stopBtn" class="btn sm" data-act="stopGame" title="Stop the game and go back to the host screen" hidden>⏹ Stop game</button>
+<button id="endBtn" class="btn sm" data-act="endGame" title="End the game now and show final results" hidden>🏁 End game</button>
 <div id="app"></div>
 <div id="toasts"></div>
 
@@ -402,7 +405,9 @@ const dots = '<span class="dots"><i></i><i></i><i></i></span>';
 const render = html => {
   $app.innerHTML = html; window.scrollTo(0, 0);
   // Stop button only while a hosted game is in progress (lobby and final screens have their own Close room)
-  $('stopBtn').hidden = !(H && !['opening', 'lobby', 'final'].includes(H.phase));
+  const inGame = !!(H && !['opening', 'lobby', 'final'].includes(H.phase));
+  $('stopBtn').hidden = $('endBtn').hidden = !inGame;
+  document.body.classList.toggle('ingame', inGame);
 };
 
 const store = {
@@ -919,7 +924,7 @@ function nextQuestion() {
       <div class="qwrap card pop" style="width:100%;max-width:1100px"><div class="qtext-big">${esc(q.text)}</div></div>
       <div class="muted" style="font-weight:700">${q.type === 'text' ? 'Answers are typed on phones' : q.type === 'scale' ? 'Answers are given on a 1–10 slider' : 'Answer options appear when the timer starts'}</div>
     </div>
-    <div class="host-ctrl"><button class="btn primary big" data-act="next">Show answers &amp; start timer ▶</button><button class="btn ghost sm" data-act="endGame">End game</button></div>
+    <div class="host-ctrl"><button class="btn primary big" data-act="next">Show answers &amp; start timer ▶</button></div>
   </div>`);
   snd('reveal');
 }
@@ -946,7 +951,7 @@ function beginQuestion() {
       : q.type === 'scale' ? `<div class="writein-host"><div class="wi-icon">🎚️</div><div>How true is it? Slide from 1 to 10 on your phone</div>
           <div class="scale-legend"><span>1 · Not true at all</span><span>10 · Totally true</span></div></div>`
       : `<div class="ans-grid ${q.choices.length > 4 ? 'many' : ''}">${q.choices.map((c, i) => `<div class="ans a${q.shapes[i]}"><span class="shape">${SHAPES[q.shapes[i]]}</span><span class="atxt">${esc(c)}</span></div>`).join('')}</div>`}
-    <div class="host-ctrl"><button class="btn sm" data-act="next">⏭ Stop timer</button><button class="btn ghost sm" data-act="endGame">End game</button></div>
+    <div class="host-ctrl"><button class="btn sm" data-act="next">⏭ Stop timer</button></div>
   </div>`);
   const total = q.time * 1000; let lastSec = null;
   const C = 2 * Math.PI * 19;
@@ -1104,7 +1109,6 @@ function renderJudge(first) {
       <div class="host-ctrl">
         ${c.pending ? `<button class="btn" data-act="judgeAcceptAll">Accept all ${c.pending} suggestion${c.pending === 1 ? '' : 's'}</button>` : ''}
         <button class="btn primary big" data-act="next" ${c.pending ? 'disabled title="Confirm every answer first"' : ''}>Award points →</button>
-        <button class="btn ghost sm" data-act="endGame">End game</button>
       </div>
     </div>
   </div>`);
@@ -1160,7 +1164,7 @@ function showLeaderboard() {
       <div class="q-progress-bar"><span style="--w:${(H.qi + 1) / H.qs.length}"></span></div>
     </div>
     <div class="lb ${two ? 'two' : ''}" style="${two ? `grid-template-rows:repeat(${Math.ceil(arr.length / 2)},auto)` : ''}">${arr.map((p, i) => lbRow(p, i, true, H.qi > 0)).join('')}</div>
-    <div class="host-ctrl"><button class="btn primary big" data-act="next">${last ? 'Final results 🏆' : 'Next question →'}</button>${last ? '' : '<button class="btn ghost sm" data-act="endGame">End game</button>'}</div>
+    <div class="host-ctrl"><button class="btn primary big" data-act="next">${last ? 'Final results 🏆' : 'Next question →'}</button></div>
   </div>`);
 }
 
