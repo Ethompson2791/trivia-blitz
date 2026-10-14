@@ -355,6 +355,34 @@ body.ingame .topbar{padding-right:180px}
 .q-progress-txt b{color:var(--ink);font-family:'Bungee',sans-serif;font-weight:400}
 .q-progress-bar{width:100%;height:10px;border-radius:10px;background:rgba(255,255,255,.1);overflow:hidden}
 .q-progress-bar span{display:block;height:100%;width:calc(var(--w) * 100%);background:linear-gradient(90deg,var(--lime),var(--cyan));border-radius:10px;animation:barw 1s .2s cubic-bezier(.2,1,.3,1) both}
+/* ---------- final review ---------- */
+.rv-layout{display:grid;grid-template-columns:1fr 360px;gap:16px;align-items:start}
+.rv-list{display:flex;flex-direction:column;gap:10px;min-width:0}
+.rv-side{position:sticky;top:64px;display:flex;flex-direction:column;gap:8px;padding:14px}
+.rv-q{padding:0;overflow:hidden}
+.rv-q summary{display:flex;align-items:center;gap:10px;padding:14px 16px;cursor:pointer;list-style:none;flex-wrap:wrap}
+.rv-q summary::-webkit-details-marker{display:none}
+.rv-q summary::before{content:'▸';color:var(--muted);transition:transform .15s}
+.rv-q[open] summary::before{transform:rotate(90deg)}
+.rv-q .qnum{font-size:16px}
+.rv-qtext{flex:1;min-width:180px;font-weight:800}
+.rv-key{padding:0 16px 10px;font-size:14px}
+.rv-rows{display:flex;flex-direction:column;gap:6px;padding:0 12px 14px}
+.rv-row{display:flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:12px;padding:6px 8px;background:rgba(255,255,255,.03)}
+.rv-row.ok{border-color:rgba(31,211,154,.55);background:rgba(31,211,154,.08)}
+.rv-row.part{border-color:rgba(255,210,61,.5);background:rgba(255,210,61,.07)}
+.rv-name{font-weight:800;width:110px;flex:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rv-ans{flex:1;min-width:0;font-weight:700;word-break:break-word}
+.rv-chg{font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:.08em;color:var(--gold)}
+.rv-row .jc-pts{width:64px;text-align:right;flex:none;font-size:14px}
+.rv-row .jb{padding:6px 12px;flex:none}
+.rv-stand{display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid var(--line)}
+.rv-stand .rv-name{flex:1;width:auto}
+.rv-adj{display:flex;align-items:center;gap:4px;flex:none}
+.rv-adj span{min-width:44px;text-align:center;font-weight:800;font-size:13px}
+.rv-adj .icon-btn{width:28px;height:28px}
+.gold-txt{color:var(--gold)}
+@media (max-width:900px){.rv-layout{grid-template-columns:1fr}.rv-side{position:static}.rv-name{width:80px}}
 .res-close{background:radial-gradient(circle at 50% 35%,rgba(255,210,61,.3),transparent 65%)}
 .res-close .res-icon{background:var(--gold);color:#1a1000;box-shadow:0 0 60px rgba(255,210,61,.55)}
 
@@ -406,7 +434,8 @@ const render = html => {
   $app.innerHTML = html; window.scrollTo(0, 0);
   // Stop button only while a hosted game is in progress (lobby and final screens have their own Close room)
   const inGame = !!(H && !['opening', 'lobby', 'final'].includes(H.phase));
-  $('stopBtn').hidden = $('endBtn').hidden = !inGame;
+  $('stopBtn').hidden = !inGame;
+  $('endBtn').hidden = !inGame || H.phase === 'review';
   document.body.classList.toggle('ingame', inGame);
 };
 
@@ -737,7 +766,7 @@ function startHosting(packet) {
   const errs = validate(packet);
   if (errs.length) { toast(errs[0], 'bad'); return; }
   if (!PeerCtor) { toast('Could not load the networking library. Check your internet connection and reload.', 'bad'); return; }
-  H = { packet, qs: packet.questions.map(compile), speed: packet.speed !== false, code: null, peer: null, players: new Map(), shown: new Set(),
+  H = { packet, qs: packet.questions.map(compile), speed: packet.speed !== false, history: [], code: null, peer: null, players: new Map(), shown: new Set(),
         phase: 'opening', qi: -1, answers: new Map(), qStart: 0 };
   render(`<div class="screen fade"><div class="spin"></div><div class="muted">Opening a room…</div></div>`);
   openRoom(0);
@@ -792,7 +821,7 @@ function hostMsg(conn, msg) {
       if (H.phase === 'final') return reject(conn, 'This game has already ended.');
       if (H.players.size >= MAX_PLAYERS) return reject(conn, `The lobby is full (${MAX_PLAYERS} players max).`);
       p = { key, name, avatar, token: msg.token, conn, connected: true, score: 0, streak: 0, rank: 0, prevRank: 0,
-            lastDelta: 0, lastOk: null, correctCount: 0 };
+            lastDelta: 0, lastOk: null, correctCount: 0, adj: 0 };
       H.players.set(key, p); snd('join');
       if (H.phase !== 'lobby') toast(`${name} joined mid-game`);
     }
@@ -891,6 +920,7 @@ function syncPlayer(p) {
       break;
     }
     case 'judge': send(p.conn, { t: 'judging' }); break;
+    case 'review': send(p.conn, { t: 'judging', review: true }); break;
     case 'reveal': send(p.conn, resultMsg(p)); break;
     case 'leaderboard': send(p.conn, standMsg(p, ranked())); break;
     case 'final': ranked(); send(p.conn, finalMsg(p)); break;
@@ -905,13 +935,13 @@ function refreshHost() {
 
 function startGame() {
   if (!H.players.size) { toast('Wait for at least one player to join', 'bad'); return; }
-  H.qi = -1; nextQuestion();
+  H.qi = -1; H.history = []; H.reviewOpen = new Set(); nextQuestion();
 }
 
 function nextQuestion() {
   clearInterval(H.cd); clearInterval(H.tick);
   H.qi++;
-  if (H.qi >= H.qs.length) return showFinal();
+  if (H.qi >= H.qs.length) return showReview();
   H.answers = new Map(); H.phase = 'getready';
   const q = H.qs[H.qi];
   bcast(readyMsg());
@@ -1027,27 +1057,120 @@ function revealScale() {
 }
 
 // Award points: isOk(answer) returns true/false, or a 0–1 fraction for partial credit.
+// Every question's answers are kept in H.history so the host can re-mark them in the final review.
 function scoreQuestion(isOk) {
-  const q = H.qs[H.qi], limit = q.time * 1000;
+  const q = H.qs[H.qi], rows = new Map();
   ranked().forEach(p => p.prevRank = p.rank);
   for (const p of H.players.values()) {
     const a = H.answers.get(p.key);
-    let delta = 0, ok = null;
-    if (a) {
-      const r = isOk(a, p), frac = r === true ? 1 : +r || 0;
-      ok = frac === 1;
-      const base = q.double ? 2000 : 1000, speed = H.speed ? 1 - Math.min(a.ms, limit) / limit / 2 : 1;
-      if (ok) {
-        p.streak++; p.correctCount++;
-        delta = Math.round(base * speed) + Math.min(p.streak - 1, 5) * 100;
-      } else { p.streak = 0; delta = Math.round(base * speed * frac); }
-    } else p.streak = 0;
-    p.score += delta; p.lastDelta = delta; p.lastOk = ok;
+    if (!a) continue;
+    const r = isOk(a, p);
+    rows.set(p.key, { ans: answerLabel(q, a), ms: a.ms, credit: r === true ? 1 : +r || 0 });
   }
+  H.history.push({ qi: H.qi, rows });
+  recomputeScores();
   ranked();
   H.phase = 'reveal';
   for (const p of H.players.values()) if (p.connected) send(p.conn, resultMsg(p));
   snd('reveal');
+}
+
+// Replay the whole game from H.history (host overrides included) so streaks and totals stay consistent.
+function recomputeScores() {
+  for (const p of H.players.values()) Object.assign(p, { score: p.adj || 0, streak: 0, correctCount: 0, lastDelta: 0, lastOk: null });
+  for (const e of H.history) {
+    const q = H.qs[e.qi], limit = q.time * 1000, base = q.double ? 2000 : 1000;
+    e.deltas = new Map();
+    for (const p of H.players.values()) {
+      const row = e.rows.get(p.key);
+      let delta = 0, ok = null;
+      if (row) {
+        const credit = row.override != null ? row.override : row.credit;
+        const speed = H.speed ? 1 - Math.min(row.ms, limit) / limit / 2 : 1;
+        ok = credit === 1;
+        if (ok) {
+          p.streak++; p.correctCount++;
+          delta = Math.round(base * speed) + Math.min(p.streak - 1, 5) * 100;
+        } else { p.streak = 0; delta = Math.round(base * speed * credit); }
+      } else p.streak = 0;
+      p.score += delta; p.lastDelta = delta; p.lastOk = ok; e.deltas.set(p.key, delta);
+    }
+  }
+}
+function answerLabel(q, a) {
+  const opt = i => SHAPES[q.shapes[i]] + ' ' + q.choices[i];
+  if (q.type === 'text') return a.txt;
+  if (q.type === 'scale') return a.v + ' / 10';
+  if (q.type === 'multi') return a.cs.map(opt).join(', ');
+  return opt(a.c);
+}
+function correctLabel(q) {
+  const opt = i => SHAPES[q.shapes[i]] + ' ' + q.choices[i];
+  if (q.type === 'text') return q.accept.join(' / ');
+  if (q.type === 'scale') return q.answer + ' / 10';
+  if (q.type === 'multi') return q.corrects.map(opt).join(', ');
+  return opt(q.correct);
+}
+
+/* ---------- final review: host can re-mark any answer before final results ---------- */
+function showReview() {
+  clearInterval(H.cd); clearInterval(H.tick); clearTimeout(H.allIn);
+  if (!H.history.length) return showFinal();
+  H.phase = 'review'; H.reviewOpen = H.reviewOpen || new Set();
+  bcast({ t: 'judging', review: true });
+  renderReview(true);
+}
+function renderReview(first) {
+  const y = scrollY, arr = ranked();
+  const players = [...H.players.values()].sort((a, b) => a.name.localeCompare(b.name));
+  const changedTotal = H.history.reduce((n, e) => n + [...e.rows.values()].filter(r => r.override != null).length, 0);
+  const cards = H.history.map((e, hi) => {
+    const q = H.qs[e.qi];
+    let nOk = 0, changed = 0;
+    const rows = players.map(p => {
+      const row = e.rows.get(p.key), credit = row ? (row.override != null ? row.override : row.credit) : 0;
+      if (credit === 1) nOk++;
+      if (row && row.override != null) changed++;
+      const d = e.deltas.get(p.key) || 0, has = row && row.ans != null;
+      return `<div class="rv-row ${credit === 1 ? 'ok' : credit > 0 ? 'part' : 'no'}">
+        <span class="pav">${p.avatar}</span><span class="rv-name">${esc(p.name)}</span>
+        <span class="rv-ans ${has ? '' : 'muted'}">${has ? esc(row.ans) : '— no answer —'}</span>
+        ${row && row.override != null ? '<span class="rv-chg">changed</span>' : ''}
+        <span class="jc-pts ${d > 0 ? 'pos' : ''}">+${fmt(d)}</span>
+        <button class="jb ok ${credit === 1 ? 'on' : ''}" data-act="reviewSet" data-h="${hi}" data-k="${esc(p.key)}" data-v="1" title="Full points">✓</button>
+        <button class="jb no ${credit === 0 ? 'on' : ''}" data-act="reviewSet" data-h="${hi}" data-k="${esc(p.key)}" data-v="0" title="No points">✕</button>
+      </div>`;
+    }).join('');
+    return `<details class="card rv-q" data-h="${hi}" ${H.reviewOpen.has(hi) ? 'open' : ''}>
+      <summary><span class="qnum">Q${e.qi + 1}</span><span class="rv-qtext">${esc(q.text)}</span>
+        <span class="pill">✓ ${nOk}/${players.length}</span>${changed ? `<span class="pill gold">${changed} changed</span>` : ''}</summary>
+      <div class="rv-key"><span class="muted">${TYPE_LABELS[q.type]} · Answer:</span> <b>${esc(correctLabel(q))}</b></div>
+      <div class="rv-rows">${rows}</div>
+    </details>`;
+  }).join('');
+  const standings = arr.map(p => `<div class="rv-stand">
+      <span class="lbrank" style="font-size:16px;width:26px">${p.rank}</span><span class="pav">${p.avatar}</span>
+      <span class="rv-name">${esc(p.name)}</span><span class="lbscore" style="font-size:15px">${fmt(p.score)}</span>
+      <span class="rv-adj"><button class="icon-btn" data-act="reviewAdj" data-k="${esc(p.key)}" data-v="-100" title="−100 points">−</button>
+        <span class="${p.adj ? 'gold-txt' : 'muted'}">${p.adj > 0 ? '+' : ''}${fmt(p.adj || 0)}</span>
+        <button class="icon-btn" data-act="reviewAdj" data-k="${esc(p.key)}" data-v="100" title="+100 points">+</button></span>
+    </div>`).join('');
+  render(`<div class="page ${first ? 'fade' : ''}">
+    <div class="topbar"><div class="pill">Final review · ${H.history.length} question${H.history.length === 1 ? '' : 's'}</div>${changedTotal ? `<span class="pill gold">${changedTotal} change${changedTotal === 1 ? '' : 's'}</span>` : '<span></span>'}<span></span></div>
+    <div class="wrap" style="max-width:1300px">
+      <div class="answers-head"><h1 class="h1 glow">Final review</h1>
+        <p class="hint" style="max-width:720px">Open any question to see everyone's answer. Tap <b>✓</b> to give full points or <b>✕</b> to take them away. Use <b>− / +</b> for bonus or penalty points. Scores update instantly; players see nothing until you show the final results.</p></div>
+      <div class="rv-layout">
+        <div class="rv-list">
+          <div class="row"><button class="btn sm" data-act="reviewAll" data-v="1">Expand all</button><button class="btn sm" data-act="reviewAll" data-v="0">Collapse all</button></div>
+          ${cards}
+        </div>
+        <div class="card rv-side"><div class="up muted">Standings</div>${standings}<div class="hint">− / + = bonus or penalty points</div></div>
+      </div>
+      <div class="host-ctrl"><button class="btn primary big" data-act="finishReview">Show final results 🏆</button></div>
+    </div>
+  </div>`);
+  if (!first) scrollTo(0, y);
 }
 
 // Write-in: after time's up the host sees every player's answer by name,
@@ -1164,7 +1287,7 @@ function showLeaderboard() {
       <div class="q-progress-bar"><span style="--w:${(H.qi + 1) / H.qs.length}"></span></div>
     </div>
     <div class="lb ${two ? 'two' : ''}" style="${two ? `grid-template-rows:repeat(${Math.ceil(arr.length / 2)},auto)` : ''}">${arr.map((p, i) => lbRow(p, i, true, H.qi > 0)).join('')}</div>
-    <div class="host-ctrl"><button class="btn primary big" data-act="next">${last ? 'Final results 🏆' : 'Next question →'}</button></div>
+    <div class="host-ctrl"><button class="btn primary big" data-act="next">${last ? 'Review answers &amp; final results →' : 'Next question →'}</button></div>
   </div>`);
 }
 
@@ -1361,11 +1484,15 @@ function playerMsg(m) {
         else screenLocked(m.shape != null ? m.shape : (P.q && P.q.shapes ? P.q.shapes[m.c] : 0));
       }
       break;
-    case 'judging':
-      if (P.phase === 'judging') break;
-      P.phase = 'judging'; clearInterval(P.tick);
-      pScreen(`<div style="font-size:90px" class="bounce">🧐</div><h1 class="h1">Checking answers…</h1><div class="waiting">The host is grading ${dots}</div>`);
+    case 'judging': {
+      const ph = m.review ? 'reviewing' : 'judging';
+      if (P.phase === ph) break;
+      P.phase = ph; clearInterval(P.tick);
+      pScreen(m.review
+        ? `<div style="font-size:90px" class="bounce">🏁</div><h1 class="h1">That's the game!</h1><div class="waiting">The host is double-checking scores. Final results coming up ${dots}</div>`
+        : `<div style="font-size:90px" class="bounce">🧐</div><h1 class="h1">Checking answers…</h1><div class="waiting">The host is grading ${dots}</div>`);
       break;
+    }
     case 'result': screenPlayerResult(m); break;
     case 'stand': screenPlayerStand(m); break;
     case 'final': screenPlayerFinal(m); break;
@@ -1585,7 +1712,27 @@ const A = {
     const b = $('speedBtn'); if (b) { b.classList.toggle('on', H.speed); b.textContent = speedLabel(); }
     snd('tap');
   },
-  endGame() { if (H && confirm('End the game now and show final results?')) showFinal(); },
+  endGame() { if (H && H.phase !== 'review' && confirm('End the game now? You can review answers before showing the final results.')) showReview(); },
+  reviewSet(el) {
+    if (!H || H.phase !== 'review') return;
+    const e = H.history[+el.dataset.h], key = el.dataset.k, v = +el.dataset.v; if (!e) return;
+    let row = e.rows.get(key);
+    if (!row) { row = { ans: null, ms: H.qs[e.qi].time * 1000, credit: 0 }; e.rows.set(key, row); } // award a player who didn't answer
+    if (v === row.credit) { delete row.override; if (row.ans == null) e.rows.delete(key); } // back to the original call
+    else row.override = v;
+    recomputeScores(); snd('tap'); renderReview(false);
+  },
+  reviewAdj(el) {
+    const p = H && H.phase === 'review' && H.players.get(el.dataset.k); if (!p) return;
+    p.adj = (p.adj || 0) + (+el.dataset.v);
+    recomputeScores(); snd('tap'); renderReview(false);
+  },
+  reviewAll(el) {
+    if (!H || H.phase !== 'review') return;
+    H.reviewOpen = el.dataset.v === '1' ? new Set(H.history.map((_, i) => i)) : new Set();
+    renderReview(false);
+  },
+  finishReview() { if (H && H.phase === 'review') showFinal(); },
   stopGame() {
     if (!H || !confirm('Stop the game and go back to the host screen?\n\nScores will be lost and all players will be disconnected.')) return;
     closeRoom();
@@ -1605,7 +1752,7 @@ const A = {
     }
     for (const [k, p] of H.players) {
       if (!p.connected) { H.players.delete(k); continue; }
-      Object.assign(p, { score: 0, streak: 0, rank: 0, prevRank: 0, lastDelta: 0, lastOk: null, correctCount: 0 });
+      Object.assign(p, { score: 0, streak: 0, rank: 0, prevRank: 0, lastDelta: 0, lastOk: null, correctCount: 0, adj: 0 });
     }
     H.qi = -1; H.phase = 'lobby';
     bcast({ t: 'lobby', count: H.players.size });
@@ -1719,6 +1866,13 @@ document.addEventListener('change', e => {
   else return;
   edDirty = true;
 });
+
+// Remember which final-review questions are expanded across re-renders ('toggle' doesn't bubble, so capture it).
+document.addEventListener('toggle', e => {
+  const d = e.target;
+  if (!H || H.phase !== 'review' || !d.matches || !d.matches('details.rv-q')) return;
+  if (d.open) H.reviewOpen.add(+d.dataset.h); else H.reviewOpen.delete(+d.dataset.h);
+}, true);
 
 // A tap on the slider that doesn't change its value (e.g. choosing the starting 5) still counts as a pick.
 document.addEventListener('pointerup', e => { if (e.target.id === 'scaleInp') A.scaleMove(e.target); });
