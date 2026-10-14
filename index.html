@@ -550,7 +550,7 @@ function normQ(q) {
 }
 const sameSet = (a, b) => a.length === b.length && a.every(x => b.includes(x));
 function normPacket(p) {
-  return { id: p.id || uid(), title: String(p.title || 'Untitled packet').slice(0, 80), speed: p.speed !== false, streak: p.streak !== false, questions: (p.questions || []).map(normQ) };
+  return { id: p.id || uid(), title: String(p.title || 'Untitled packet').slice(0, 80), speed: p.speed !== false, streak: p.streak !== false, partial: p.partial === true, questions: (p.questions || []).map(normQ) };
 }
 function getPackets() {
   let p = store.get('tb_packets', null);
@@ -667,7 +667,7 @@ function screenHostHome() {
       <div class="pack-grid">${packs.length ? packs.map(p => `
         <div class="card pack">
           <div class="pack-title">${esc(p.title || 'Untitled')}</div>
-          <div class="muted sm">${p.questions.length} question${p.questions.length === 1 ? '' : 's'} · ${p.questions.reduce((s, q) => s + q.time, 0)}s of answer time · ${p.speed ? '⚡ speed bonus' : 'no speed bonus'} · ${p.streak ? '🔥 streak bonus' : 'no streak bonus'}</div>
+          <div class="muted sm">${p.questions.length} question${p.questions.length === 1 ? '' : 's'} · ${p.questions.reduce((s, q) => s + q.time, 0)}s of answer time · ${p.speed ? '⚡ speed bonus' : 'no speed bonus'} · ${p.streak ? '🔥 streak bonus' : 'no streak bonus'}${p.partial ? ' · ☑ partial credit' : ''}</div>
           <div class="row">
             <button class="btn primary sm" data-act="hostPacket" data-id="${p.id}">▶ Host</button>
             <button class="btn sm" data-act="editPacket" data-id="${p.id}">✎ Edit</button>
@@ -728,6 +728,8 @@ function screenEditor() {
         <span class="hint">Off = every correct answer is worth full points, no matter how fast. You can also change this in the lobby.</span></div>
       <div class="row"><label class="dbl ${ED.streak ? 'on' : ''}"><input type="checkbox" data-bind="streak" ${ED.streak ? 'checked' : ''}> 🔥 Streak bonus</label>
         <span class="hint">On = +100 points for each correct answer in a row (up to +500). You can also change this in the lobby.</span></div>
+      <div class="row"><label class="dbl ${ED.partial ? 'on' : ''}"><input type="checkbox" data-bind="partial" ${ED.partial ? 'checked' : ''}> ☑ Partial credit on multi-select</label>
+        <span class="hint">On = points for (right picks − wrong picks) ÷ number of correct answers. Off = must pick exactly the right set. You can also change this in the lobby.</span></div>
       <p class="hint">Choice questions: tap the circle next to an answer to mark it correct (blank answers are skipped, so use 2–4). Multi-select questions: up to ${MULTI_MAX} answers, any number of them correct, and players must pick all the right ones. Slider questions: players guess 1–10 how true a statement is, and closer guesses earn more. Write-in questions: players type their answer, bar-trivia style. Correct answers earn up to 1000 points (doubled on 2× questions). With the speed bonus on, slower answers earn less (down to 500); with the streak bonus on, answers in a row earn extra.</p>
       <div id="qlist">${ED.questions.map(qCard).join('')}</div>
       <div class="row center-row">
@@ -768,7 +770,7 @@ function startHosting(packet) {
   const errs = validate(packet);
   if (errs.length) { toast(errs[0], 'bad'); return; }
   if (!PeerCtor) { toast('Could not load the networking library. Check your internet connection and reload.', 'bad'); return; }
-  H = { packet, qs: packet.questions.map(compile), speed: packet.speed !== false, streak: packet.streak !== false, history: [], code: null, peer: null, players: new Map(), shown: new Set(),
+  H = { packet, qs: packet.questions.map(compile), speed: packet.speed !== false, streak: packet.streak !== false, partial: packet.partial === true, history: [], code: null, peer: null, players: new Map(), shown: new Set(),
         phase: 'opening', qi: -1, answers: new Map(), qStart: 0 };
   render(`<div class="screen fade"><div class="spin"></div><div class="muted">Opening a room…</div></div>`);
   openRoom(0);
@@ -1013,15 +1015,16 @@ function endQuestion() {
   if (q.type === 'scale') return revealScale();
   const multi = q.type === 'multi';
   const isCorrect = i => multi ? q.corrects.includes(i) : i === q.correct;
-  scoreQuestion(a => multi ? sameSet(a.cs, q.corrects) : a.c === q.correct);
+  scoreQuestion(a => multi ? multiCredit(a.cs, q.corrects) : a.c === q.correct);
 
   const counts = q.choices.map(() => 0);
   for (const a of H.answers.values()) { if (multi) a.cs.forEach(c => counts[c]++); else counts[a.c]++; }
   const max = Math.max(1, ...counts);
   const nOk = multi ? [...H.players.values()].filter(p => p.lastOk).length : counts[q.correct];
+  const nPart = multi && H.partial ? [...H.players.values()].filter(p => !p.lastOk && p.lastDelta > 0).length : 0;
   const many = q.choices.length > 4 ? 'many' : '';
   render(`<div class="page fade">
-    <div class="topbar"><div class="pill">Q ${H.qi + 1}/${H.qs.length}</div><div class="pill">✓ ${nOk} of ${H.players.size} got ${multi ? 'them all' : 'it'} right</div><span></span></div>
+    <div class="topbar"><div class="pill">Q ${H.qi + 1}/${H.qs.length}</div><div class="row tight"><div class="pill">✓ ${nOk} of ${H.players.size} got ${multi ? 'them all' : 'it'} right</div>${nPart ? `<div class="pill gold">${nPart} partial</div>` : ''}</div><span></span></div>
     <div class="qwrap"><div class="qtext-big sm">${esc(q.text)}</div></div>
     <div class="bars ${many}">${q.choices.map((c, i) => `
       <div class="barcol ${isCorrect(i) ? 'win' : 'lose'}"><div class="bcount">${counts[i]}</div>
@@ -1031,6 +1034,14 @@ function endQuestion() {
     <div class="ans-grid reveal ${many}">${q.choices.map((c, i) => `<div class="ans a${q.shapes[i]} ${isCorrect(i) ? 'correct' : 'dim'}"><span class="shape">${SHAPES[q.shapes[i]]}</span><span class="atxt">${esc(c)}</span>${isCorrect(i) ? '<span class="shape">✓</span>' : ''}</div>`).join('')}</div>
     <div class="host-ctrl"><button class="btn primary big" data-act="next">Leaderboard →</button></div>
   </div>`);
+}
+
+// Multi-select: exact set = full points. With partial credit on, (right − wrong) ÷ number correct, never below 0.
+function multiCredit(cs, corrects) {
+  if (sameSet(cs, corrects)) return 1;
+  if (!H.partial) return 0;
+  const right = cs.filter(c => corrects.includes(c)).length, wrong = cs.length - right;
+  return Math.max(0, (right - wrong) / corrects.length);
 }
 
 // Slider: exact = full points, off by 1 = half, off by 2 = quarter.
@@ -1335,6 +1346,7 @@ function screenHostLobby() {
         <div id="plist" class="plist"></div>
         <button id="speedBtn" class="dbl ${H.speed ? 'on' : ''}" data-act="toggleSpeed" style="background:none;color:inherit;justify-content:center">${speedLabel()}</button>
         <button id="streakBtn" class="dbl ${H.streak ? 'on' : ''}" data-act="toggleStreak" style="background:none;color:inherit;justify-content:center">${streakLabel()}</button>
+        ${H.qs.some(q => q.type === 'multi') ? `<button id="partialBtn" class="dbl ${H.partial ? 'on' : ''}" data-act="togglePartial" style="background:none;color:inherit;justify-content:center">${partialLabel()}</button>` : ''}
         <button id="startBtn" class="btn primary big full" data-act="next">Start game ▶</button>
         <div class="muted sm center-text">Tip: press <b>Space</b> to advance through the game.</div>
       </div>
@@ -1348,6 +1360,8 @@ function screenHostLobby() {
 function speedLabel() { return H.speed ? '⚡ Speed bonus ON: faster answers score more' : '⏸ Speed bonus OFF: every correct answer scores full points'; }
 
 function streakLabel() { return H.streak ? '🔥 Streak bonus ON: +100 per correct answer in a row' : '⏸ Streak bonus OFF: no extra points for answers in a row'; }
+
+function partialLabel() { return H.partial ? '☑ Multi-select partial credit ON: points for each right pick' : '⏸ Multi-select partial credit OFF: must pick the exact set'; }
 
 function renderPlist() {
   const el = $('plist'); if (!el) return;
@@ -1621,13 +1635,13 @@ const A = {
   join() { doJoin(); },
   leave() { if (!P) return; send(P.conn, { t: 'leave' }); sess.del('tb_sess'); cleanupPlayer(); P = null; screenHome(); },
 
-  newPacket() { ED = { id: uid(), title: '', speed: true, streak: true, questions: [normQ({})] }; edDirty = false; screenEditor(); },
+  newPacket() { ED = { id: uid(), title: '', speed: true, streak: true, partial: false, questions: [normQ({})] }; edDirty = false; screenEditor(); },
   editPacket(el) { const p = getPackets().find(x => x.id === el.dataset.id); if (!p) return; ED = clone(p); edDirty = false; screenEditor(); },
   hostPacket(el) { const p = getPackets().find(x => x.id === el.dataset.id); if (p) startHosting(p); },
   exportPacket(el) {
     const p = getPackets().find(x => x.id === el.dataset.id); if (!p) return;
     const name = (p.title || 'packet').replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '-').toLowerCase() || 'packet';
-    download(name + '.json', JSON.stringify({ title: p.title, speed: p.speed, streak: p.streak, questions: p.questions }, null, 2));
+    download(name + '.json', JSON.stringify({ title: p.title, speed: p.speed, streak: p.streak, partial: p.partial, questions: p.questions }, null, 2));
   },
   delPacket(el) {
     const packs = getPackets(), p = packs.find(x => x.id === el.dataset.id);
@@ -1711,6 +1725,7 @@ const A = {
   },
   toggleSpeed() { toggleScoring('speed', 'speedBtn', speedLabel); },
   toggleStreak() { toggleScoring('streak', 'streakBtn', streakLabel); },
+  togglePartial() { toggleScoring('partial', 'partialBtn', partialLabel); },
   endGame() { if (H && H.phase !== 'review' && confirm('End the game now? You can review answers before showing the final results.')) showReview(); },
   reviewSet(el) {
     if (!H || H.phase !== 'review') return;
@@ -1747,7 +1762,7 @@ const A = {
     const sel = $('nextPack');
     if (sel) {
       const f = getPackets().find(p => p.id === sel.value);
-      if (f && f.id !== H.packet.id) { const errs = validate(f); if (errs.length) return toast(errs[0], 'bad'); H.packet = f; H.qs = f.questions.map(compile); H.speed = f.speed; H.streak = f.streak; }
+      if (f && f.id !== H.packet.id) { const errs = validate(f); if (errs.length) return toast(errs[0], 'bad'); H.packet = f; H.qs = f.questions.map(compile); H.speed = f.speed; H.streak = f.streak; H.partial = f.partial; }
     }
     for (const [k, p] of H.players) {
       if (!p.connected) { H.players.delete(k); continue; }
@@ -1868,7 +1883,7 @@ document.addEventListener('input', e => {
 });
 document.addEventListener('change', e => {
   const t = e.target, b = t.dataset.bind; if (!b || !ED) return;
-  if (b === 'speed' || b === 'streak') { ED[b] = t.checked; t.closest('.dbl').classList.toggle('on', t.checked); edDirty = true; return; }
+  if (b === 'speed' || b === 'streak' || b === 'partial') { ED[b] = t.checked; t.closest('.dbl').classList.toggle('on', t.checked); edDirty = true; return; }
   const q = ED.questions[+t.dataset.i];
   if (b === 'time') q.time = +t.value;
   else if (b === 'double') { q.double = t.checked; t.closest('.dbl').classList.toggle('on', t.checked); }
